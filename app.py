@@ -109,6 +109,7 @@ with st.sidebar:
         st.number_input("外送平台抽成（%）", 0.0, 100.0, step=1.0, key="delivery_commission")
         st.selectbox("營業稅類型", list(TAX_RATES), key="tax_type")
 
+    st.caption("這裡只填員工；老闆自己的收入看營業淨利。")
     with st.expander("C 人力", expanded=True):
         ft_count = int(st.number_input("正職人數", 0, MAX_FT, step=1, key="ft_count"))
         for i in range(ft_count):
@@ -127,7 +128,10 @@ with st.sidebar:
         st.number_input("啟動資金（元）", 0.0, step=10000.0, key="capital")
         st.number_input("租約或加盟合約年限（年）", 0.0, 20.0, step=0.5, key="contract_years")
         st.number_input("老闆不開店、去上班的月薪（元）", 0.0, step=1000.0,
-                        key="owner_alt_wage")
+                        key="owner_alt_wage",
+                        help="如果不開店、改去上班，每月大約能領多少薪水。系統會從營業淨利中扣除"
+                             "這筆薪水和啟動資金的利息，算出『經濟淨利』：大於 0，代表開店比去上班"
+                             "划算。人事欄位只填員工的薪水；老闆自己的收入，就是營業淨利。")
 
     with st.expander("F 養店期", expanded=True):
         ramp_months = int(st.number_input("養店期長度（月）", 0, RAMP_MAX_MONTHS, step=1,
@@ -217,7 +221,7 @@ st.markdown("\n".join(f"{i}. {h}" for i, h in enumerate(r.highlights, start=1)))
 st.subheader("成本結構與產業平均")
 chart_labels = {"food": "食材（含包材）", "labor": "人事", "rent": "租金"}
 chart_rows = ([(chart_labels[g.key], g.ratio, g.bench_avg) for g in r.cost_gaps]
-              + [("現金利益率", r.cash_margin, bench["pre_dep_margin"][0])])
+              + [("營業淨利率（折舊前）", r.cash_margin, bench["pre_dep_margin"][0])])
 order = [row[0] for row in chart_rows]
 series = ["本計畫", "產業平均"]
 chart_df = pd.DataFrame(
@@ -232,7 +236,7 @@ chart = alt.Chart(chart_df).mark_bar().encode(
 )
 st.altair_chart(chart, width="stretch")
 st.caption(f"產業數據：經濟部經營實況調查，{plan.industry}，2018–2024 六個調查年平均，"
-           "以營業額加權，大型業者影響較大。現金利益率對照的是折舊前營業利益率"
+           "以營業額加權，大型業者影響較大。營業淨利率（折舊前）對照的是產業的折舊前營業利益率"
            "（營業利益率 + 折舊率）。")
 
 # ===========================================================================
@@ -253,7 +257,7 @@ with left:
         ("− 人事成本（含法定負擔）", -r.labor_cost),
         ("− 租金", -plan.rent),
         ("− 水電瓦斯與其他", -(plan.utilities + plan.other_fixed)),
-        ("＝ 穩定期現金淨利", r.cash_profit),
+        ("＝ 營業淨利（折舊前）", r.cash_profit),
         ("− 機會成本（老闆替代月薪、資金利息）", -r.opportunity_cost),
         ("＝ 經濟淨利", r.economic_profit),
     ], columns=["項目", "每月金額（元）"])
@@ -271,7 +275,7 @@ with right:
         rows.append({"項目": g.name, "本計畫": g.ratio, "產業平均": g.bench_avg,
                      "差距": f"{g.gap * 100:+.1f} 個百分點", "產業歷年區間": f"{lo:.1%}–{hi:.1%}"})
     avg, lo, hi = bench["pre_dep_margin"]
-    rows.append({"項目": "現金利益率（對照折舊前營業利益率）", "本計畫": r.cash_margin,
+    rows.append({"項目": "營業淨利率（折舊前）（對照產業折舊前營業利益率）", "本計畫": r.cash_margin,
                  "產業平均": avg, "差距": f"{(r.cash_margin - avg) * 100:+.1f} 個百分點",
                  "產業歷年區間": f"{lo:.1%}–{hi:.1%}"})
     st.dataframe(pd.DataFrame(rows).style.format({"本計畫": "{:.1%}", "產業平均": "{:.1%}"}),
@@ -285,9 +289,9 @@ zone_msg(f"本計畫 SPLH **{money(r.splh)}**，落在「**{r.splh_zone}**」區
 s1, s2, s3, s4 = st.columns(4)
 s1.metric("損益平衡 SPLH", money(r.splh_breakeven), help="低於此值：虧損")
 s2.metric("健康下限", money(r.splh_healthy),
-          help="現金利益率等於產業折舊前營業利益率歷年最低值時的 SPLH；低於此值：獲利偏低")
+          help="營業淨利率（折舊前）等於產業折舊前營業利益率歷年最低值時的 SPLH；低於此值：獲利偏低")
 s3.metric("產業平均水準", money(r.splh_industry),
-          help="現金利益率等於產業折舊前營業利益率平均值時的 SPLH")
+          help="營業淨利率（折舊前）等於產業折舊前營業利益率平均值時的 SPLH")
 s4.metric("人力吃緊上限", money(r.splh_strained),
           help="平均每工時人事成本 ÷ 產業人事成本率歷年最低值；高於此值：人力吃緊")
 st.caption(f"總工時 {r.total_hours:,.2f} 小時／月（正職每人以 {FT_MONTHLY_HOURS} 小時計，"
@@ -306,11 +310,11 @@ with left2:
     sched = pd.DataFrame(
         [(f"第 {m} 月" if m <= len(plan.ramp) else f"第 {m} 月起", rev, profit, cum)
          for m, rev, profit, cum in r.ramp_schedule],
-        columns=["月份", "營業額（元）", "現金淨利（元）", "累計現金淨利（元）"])
+        columns=["月份", "營業額（元）", "營業淨利（折舊前，元）", "累計營業淨利（折舊前，元）"])
     st.dataframe(sched.style.format({c: fmt_money for c in sched.columns[1:]}),
                  hide_index=True, width="stretch")
     st.caption("養店期預設值來自作者單一門市經驗，請依自身情況調整。"
-               "累計現金淨利達到啟動資金的月份即為回本月數，以內插法計算。")
+               "累計營業淨利（折舊前）達到啟動資金的月份即為回本月數，以內插法計算。")
 
 # 營業額下滑情境與風險說明
 with right2:
@@ -319,8 +323,8 @@ with right2:
     v1.metric("損益兩平營業額", money(r.breakeven_revenue)
               if math.isfinite(r.breakeven_revenue) else "無法損益兩平")
     v2.metric("安全邊際", pct(r.margin_of_safety), help="營業額少多少就會開始虧損")
-    sens = pd.DataFrame(r.sensitivity, columns=["情境", "營業額（元）", "現金淨利（元）"])
-    st.dataframe(sens.style.format({"營業額（元）": fmt_money, "現金淨利（元）": fmt_money}),
+    sens = pd.DataFrame(r.sensitivity, columns=["情境", "營業額（元）", "營業淨利（折舊前，元）"])
+    st.dataframe(sens.style.format({"營業額（元）": fmt_money, "營業淨利（折舊前，元）": fmt_money}),
                  hide_index=True, width="stretch")
     st.markdown("**風險說明**（只做說明，不影響結論）")
     for risk in r.risks:

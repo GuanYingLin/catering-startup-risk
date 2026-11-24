@@ -209,7 +209,7 @@ class Result:
     splh_industry: float
     splh_strained: float
     splh_zone: str
-    ramp_schedule: list[tuple[int, float, float, float]]  # (月, 營業額, 現金淨利, 累計)
+    ramp_schedule: list[tuple[int, float, float, float]]  # (月, 營業額, 營業淨利（折舊前）, 累計)
     payback_months: float  # 含養店期
     stable_payback_months: float  # 不含養店期，僅供對照
     contract_months: float
@@ -241,7 +241,7 @@ def pct_text(x: float) -> str:
 
 def payback_with_ramp(capital: float, revenue: float, cm_rate: float, fixed_cost: float,
                       ramp: list[float]) -> tuple[float, list[tuple[int, float, float, float]]]:
-    """逐月累計現金淨利，回傳累計達到啟動資金的月數（內插，四捨五入到小數一位）。
+    """逐月累計營業淨利（折舊前），回傳累計達到啟動資金的月數（內插，四捨五入到小數一位）。
 
     無法回本時回傳 inf。另回傳養店期加第一個穩定月的逐月明細。
     """
@@ -276,12 +276,12 @@ def _highlights(cash_profit: float, payback_months: float, contract_months: floa
                 splh: float, splh_zone: str, splh_breakeven: float, splh_healthy: float,
                 splh_strained: float, cost_gaps: list[CostGap]) -> list[str]:
     """重點摘要的三句白話重點：獲利與回本、SPLH 區間、成本結構。"""
-    # 第 1 句：每月現金淨利與含養店期回本月數，並與租約比較
+    # 第 1 句：每月營業淨利（折舊前）與含養店期回本月數，並與租約比較
     if cash_profit <= 0:
-        s1 = (f"穩定期每月現金淨利 {fmt_money(cash_profit)} 元，營運不賺錢，"
-              "累計現金淨利永遠追不上啟動資金，無法回本。")
+        s1 = (f"每月營業淨利（折舊前）{fmt_money(cash_profit)} 元，營運不賺錢，"
+              "累計營業淨利（折舊前）永遠追不上啟動資金，無法回本。")
     else:
-        s1 = (f"穩定期每月現金淨利 {fmt_money(cash_profit)} 元，"
+        s1 = (f"每月營業淨利（折舊前）{fmt_money(cash_profit)} 元，"
               f"含養店期約 {_months_text(payback_months)}回本")
         if not contract_months:
             s1 += "；租約未填，無法和租約比較。"
@@ -355,7 +355,7 @@ def evaluate(p: Plan) -> Result:
                   + p.pt_wage * p.pt_hours * p.pt_multiplier)
     fixed_cost = labor_cost + p.rent + p.utilities + p.other_fixed
 
-    # 4. 穩定期現金淨利、現金利益率、經濟淨利
+    # 4. 營業淨利（折舊前）、營業淨利率（折舊前）、經濟淨利
     cash_profit = contribution - fixed_cost
     cash_margin = _safe_div(cash_profit, revenue)
     opportunity_cost = p.owner_alt_wage + p.capital * p.capital_rate / 12
@@ -371,7 +371,7 @@ def evaluate(p: Plan) -> Result:
     splh = _safe_div(revenue, total_hours)
 
     def revenue_for_margin(margin: float) -> float:
-        """現金利益率剛好等於 margin 時所需的營業額。"""
+        """營業淨利率（折舊前）剛好等於 margin 時所需的營業額。"""
         return fixed_cost / (cm_rate - margin) if cm_rate > margin else float("inf")
 
     splh_breakeven = _safe_div(breakeven_revenue, total_hours)
@@ -455,17 +455,17 @@ def evaluate(p: Plan) -> Result:
         return "略過" if ok is None else ("通過" if ok else "未通過")
 
     criteria = [
-        Criterion("① 營運是否賺錢", f"穩定期現金淨利 {fmt_money(cash_profit)} 元／月",
+        Criterion("① 營運是否賺錢", f"營業淨利（折舊前）{fmt_money(cash_profit)} 元／月",
                   "大於 0 元", status(profit_ok)),
         Criterion("② 能否在租約內回本", f"含養店期回本 {payback_text}",
                   (f"不超過租約 {contract_months:,.0f} 個月" if contract_months
                    else "租約未填"), status(payback_ok)),
-        Criterion("③ 獲利是否達業界水準", f"現金利益率 {pct_text(cash_margin)}",
+        Criterion("③ 獲利是否達業界水準", f"營業淨利率（折舊前）{pct_text(cash_margin)}",
                   f"至少 {min_margin:.1%}（{p.industry}折舊前營業利益率歷年最低值）",
                   status(margin_ok)),
     ]
     if not profit_ok:
-        verdict, verdict_sentence = "不可行", "不可行：營運不賺錢，穩定期每月現金淨利未大於 0"
+        verdict, verdict_sentence = "不可行", "不可行：營運不賺錢，每月營業淨利（折舊前）未大於 0"
     elif payback_ok is False:
         verdict = "不建議"
         verdict_sentence = (f"不建議：無法在租約內回本（含養店期回本 {payback_text}，"
@@ -473,7 +473,7 @@ def evaluate(p: Plan) -> Result:
     elif not margin_ok:
         verdict = "可行，但獲利偏低"
         verdict_sentence = "可行，但獲利偏低：營運賺錢" + (
-            "、能在租約內回本" if payback_ok else "") + "，但現金利益率未達業界水準"
+            "、能在租約內回本" if payback_ok else "") + "，但營業淨利率（折舊前）未達業界水準"
     else:
         verdict = "可行"
         verdict_sentence = ("可行：三項檢查全部通過" if payback_ok
@@ -493,7 +493,7 @@ def evaluate(p: Plan) -> Result:
         mos = "—" if math.isnan(margin_of_safety) else f"{margin_of_safety:.1%}"
         risks.append(f"安全邊際偏低：{mos}，低於 {MOS_THRESHOLD:.0%}。")
     for label, _, profit in sensitivity[1:]:
-        risks.append(f"{label} 時，每月現金淨利為 {fmt_money(profit)} 元。")
+        risks.append(f"{label} 時，每月營業淨利（折舊前）為 {fmt_money(profit)} 元。")
     if splh_zone == "人力吃緊":
         risks.append(f"SPLH 進入人力吃緊區：{fmt_money(splh)} 元，高於上限 {fmt_money(splh_strained)} 元，"
                      "人手可能不足以支撐預估營業額。")
