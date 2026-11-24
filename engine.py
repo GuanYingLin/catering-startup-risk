@@ -46,12 +46,65 @@ FT_MONTHLY_HOURS = 176  # 正職每月工時（每週 40 小時 × 4.4 週）
 CAPITAL_RATE = 0.017  # 資金機會成本年利率：假設值，待查證
 MOS_THRESHOLD = 0.20  # 安全邊際提示門檻：設計預設值，只用於風險說明，不影響結論
 
+SENSITIVITY_DROPS = (0.10, 0.20)  # 營業額下滑情境：設計預設值
+
 # 養店期：第 1–6 個月營業額占穩定期的比例，第 7 個月起 100%
-# 預設值依作者實際經營經驗校準
+# 預設值與期間長度皆來自作者單一門市經驗
 RAMP_DEFAULT = (0.60, 0.60, 0.70, 0.70, 0.80, 0.80)
+RAMP_MONTHS = len(RAMP_DEFAULT)
 
 VERDICTS = ("不可行", "不建議", "可行，但獲利偏低", "可行")
 SPLH_ZONES = ("虧損", "獲利偏低", "健康", "人力吃緊")
+
+
+# ---------------------------------------------------------------------------
+# 假設與資料來源：所有固定參數的清單（畫面底部表格使用，由上方常數產生）
+# 類別：公開資料／法規／設計假設／作者經驗
+# ---------------------------------------------------------------------------
+
+def _bench_text(t: tuple[float, float, float]) -> str:
+    return f"平均 {t[0]:.2%}（歷年 {t[1]:.2%}–{t[2]:.2%}）"
+
+
+_MOEA = "經濟部統計處「批發、零售及餐飲業經營實況調查」2018–2024 六個調查年（2021 普查年無資料）"
+_BENCH_NAMES = {"food": "食材成本率", "labor": "人事成本率", "rent": "租金率",
+                "pre_dep_margin": "折舊前營業利益率"}
+
+ASSUMPTIONS: list[tuple[str, str, str, str]] = [
+    *[("公開資料", f"{ind}{_BENCH_NAMES[k]}", _bench_text(v),
+       _MOEA + ("；營業利益率 + 折舊率" if k == "pre_dep_margin" else ""))
+      for ind, items in BENCHMARKS.items() for k, v in items.items()],
+    ("法規", "基本工資（月薪）", f"{MIN_MONTHLY_WAGE_2026:,} 元", "勞動部公告，2026-01-01 起生效"),
+    ("法規", "基本工資（時薪）", f"{MIN_HOURLY_WAGE_2026} 元", "勞動部公告，2026-01-01 起生效"),
+    ("法規", "營業稅：小規模營業人", f"{TAX_RATES['小規模營業人（1%）']:.0%}",
+     "加值型及非加值型營業稅法第 13 條（查定課徵）"),
+    ("法規", "營業稅：使用統一發票", f"{TAX_RATES['使用統一發票（5%）']:.0%}",
+     "加值型及非加值型營業稅法第 10 條"),
+    ("法規", "正職法定負擔倍數", f"{FT_MULTIPLIER:.2f}",
+     "依勞保、就保、健保、勞退（雇主提繳 6%）、職保的雇主負擔估算，2026 年約 19.8%；"
+     "以投保薪資等於月薪計，實際依投保級距略有差異。可在進階設定調整"),
+    ("設計假設", "兼職法定負擔倍數", f"{PT_MULTIPLIER:.2f}",
+     "假設值，待依投保級距查證。可在進階設定調整"),
+    ("設計假設", "正職每月工時", f"{FT_MONTHLY_HOURS} 小時",
+     "每週 40 小時（勞動基準法第 30 條正常工時上限）× 每月 4.4 週"),
+    ("設計假設", "資金機會成本年利率", f"{CAPITAL_RATE:.1%}",
+     "假設值，約為銀行一年期定存利率，待查證。可在進階設定調整"),
+    ("設計假設", "安全邊際提示門檻", f"{MOS_THRESHOLD:.0%}",
+     "設計預設值，非官方標準；只用於風險說明，不影響結論"),
+    ("設計假設", "營業額下滑情境", "、".join(f"−{d:.0%}" for d in SENSITIVITY_DROPS),
+     "設計預設值；只用於風險說明，不影響結論"),
+    ("設計假設", "「業界水準」與「健康下限」門檻", "折舊前營業利益率歷年最低值",
+     "取產業數據的歷年最低值作為最低可接受水準，而非平均值"),
+    ("設計假設", "「人力吃緊上限」門檻", "人事成本率歷年最低值",
+     "人事成本率低於產業歷年最低，視為人手可能不足"),
+    ("作者經驗", f"養店期第 1–{RAMP_MONTHS} 個月營業額比例",
+     "、".join(f"{s:.0%}" for s in RAMP_DEFAULT),
+     "作者單一門市經驗，請依自身情況調整"),
+    ("作者經驗", "養店期長度", f"{RAMP_MONTHS} 個月（第 {RAMP_MONTHS + 1} 個月起 100%）",
+     f"作者單一門市經驗；目前程式固定為 {RAMP_MONTHS} 個月，畫面無法調整"),
+    ("作者經驗", "範例門市數字", "按「載入範例」帶入",
+     "作者經營的早午餐加盟門市 2025/04–2026/03 實際數字；只作範例，不進入計算公式"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +160,15 @@ class Check:
 
 
 @dataclass
+class Criterion:
+    """判斷表的一項通過標準。status：通過／未通過／略過。"""
+    name: str
+    actual: str
+    standard: str
+    status: str
+
+
+@dataclass
 class CostGap:
     key: str
     name: str
@@ -147,9 +209,9 @@ class Result:
     cost_gaps: list[CostGap]
     sensitivity: list[tuple[str, float, float]]
     legal_checks: list[Check]
-    steps: list[Check]  # 判斷表各步驟；passed=True 代表「符合條件」
+    criteria: list[Criterion]  # 判斷表三項通過標準
     verdict: str
-    verdict_reason: str
+    verdict_sentence: str  # 白話結論，例如「可行：三項檢查全部通過」
     risks: list[str]
 
 
@@ -162,6 +224,10 @@ def fmt_money(x: float | None) -> str:
     if x is None or not math.isfinite(x):
         return "—"
     return f"{round(x) or 0:,}"
+
+
+def pct_text(x: float) -> str:
+    return "—" if not math.isfinite(x) else f"{x:.1%}"
 
 
 def payback_with_ramp(capital: float, revenue: float, cm_rate: float, fixed_cost: float,
@@ -280,7 +346,8 @@ def evaluate(p: Plan) -> Result:
         ))
 
     sensitivity = []
-    for label, factor in (("預估營業額", 1.0), ("營業額少 10%", 0.9), ("營業額少 20%", 0.8)):
+    scenarios = [("預估營業額", 1.0)] + [(f"營業額少 {d:.0%}", 1 - d) for d in SENSITIVITY_DROPS]
+    for label, factor in scenarios:
         r = revenue * factor
         sensitivity.append((label, r, r * cm_rate - fixed_cost))
 
@@ -296,25 +363,44 @@ def evaluate(p: Plan) -> Result:
             "兼職時薪不低於基本時薪", p.pt_wage >= MIN_HOURLY_WAGE_2026,
             f"2026 年基本時薪 {MIN_HOURLY_WAGE_2026} 元，本計畫 {p.pt_wage:,.0f} 元"))
 
-    # ---------------- 判斷表：由上往下，符合第一個就停止 ----------------
+    # ---------------- 判斷表：三項通過標準 ----------------
+    # 結論規則：第 1 項未通過 → 不可行；第 1 項通過、第 2 項未通過 → 不建議；
+    # 只有第 3 項未通過 → 可行，但獲利偏低；全部通過（第 2 項可略過）→ 可行
     min_margin = bench["pre_dep_margin"][1]
     payback_text = ("無法回本" if math.isinf(payback_months)
                     else f"{payback_months:,.1f} 個月")
-    steps = [
-        Check("① 穩定期現金淨利 ≤ 0 → 不可行", cash_profit <= 0,
-              f"穩定期現金淨利每月 {fmt_money(cash_profit)} 元"),
-        Check("② 含養店期回本月數 > 租約月數 → 不建議",
-              bool(contract_months) and payback_months > contract_months,
-              (f"含養店期回本 {payback_text}，租約 {contract_months:,.0f} 個月"
-               if contract_months else "租約未填，略過")),
-        Check("③ 現金利益率 < 產業折舊前營業利益率歷年最低值 → 可行，但獲利偏低",
-              not cash_margin >= min_margin,
-              f"現金利益率 {cash_margin:.1%}，{p.industry}歷年最低 {min_margin:.1%}"),
-        Check("④ 其他 → 可行", True, "前三項皆不符合"),
+    profit_ok = cash_profit > 0
+    payback_ok = (None if not contract_months
+                  else payback_months <= contract_months)  # None = 略過
+    margin_ok = cash_margin >= min_margin  # nan 時為 False
+
+    def status(ok: bool | None) -> str:
+        return "略過" if ok is None else ("通過" if ok else "未通過")
+
+    criteria = [
+        Criterion("① 營運是否賺錢", f"穩定期現金淨利 {fmt_money(cash_profit)} 元／月",
+                  "大於 0 元", status(profit_ok)),
+        Criterion("② 能否在租約內回本", f"含養店期回本 {payback_text}",
+                  (f"不超過租約 {contract_months:,.0f} 個月" if contract_months
+                   else "租約未填"), status(payback_ok)),
+        Criterion("③ 獲利是否達業界水準", f"現金利益率 {pct_text(cash_margin)}",
+                  f"至少 {min_margin:.1%}（{p.industry}折舊前營業利益率歷年最低值）",
+                  status(margin_ok)),
     ]
-    hit = next(i for i, s in enumerate(steps) if s.passed)
-    verdict = VERDICTS[hit]
-    verdict_reason = steps[hit].detail
+    if not profit_ok:
+        verdict, verdict_sentence = "不可行", "不可行：營運不賺錢，穩定期每月現金淨利未大於 0"
+    elif payback_ok is False:
+        verdict = "不建議"
+        verdict_sentence = (f"不建議：無法在租約內回本（含養店期回本 {payback_text}，"
+                            f"租約 {contract_months:,.0f} 個月）")
+    elif not margin_ok:
+        verdict = "可行，但獲利偏低"
+        verdict_sentence = "可行，但獲利偏低：營運賺錢" + (
+            "、能在租約內回本" if payback_ok else "") + "，但現金利益率未達業界水準"
+    else:
+        verdict = "可行"
+        verdict_sentence = ("可行：三項檢查全部通過" if payback_ok
+                            else "可行：其餘檢查全部通過（租約未填，回本檢查略過）")
 
     # ---------------- 風險說明（只說明，不影響結論） ----------------
     risks: list[str] = []
@@ -349,8 +435,8 @@ def evaluate(p: Plan) -> Result:
         ramp_schedule=ramp_schedule, payback_months=payback_months,
         stable_payback_months=stable_payback_months, contract_months=contract_months,
         ratios=ratios, cost_gaps=cost_gaps, sensitivity=sensitivity,
-        legal_checks=legal_checks, steps=steps, verdict=verdict,
-        verdict_reason=verdict_reason, risks=risks,
+        legal_checks=legal_checks, criteria=criteria, verdict=verdict,
+        verdict_sentence=verdict_sentence, risks=risks,
     )
 
 

@@ -9,9 +9,9 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from engine import (BENCHMARKS, EXAMPLE_STORE, FT_MONTHLY_HOURS, MIN_HOURLY_WAGE_2026,
-                    MIN_MONTHLY_WAGE_2026, MOS_THRESHOLD, TAX_RATES, Plan, evaluate,
-                    fmt_money)
+from engine import (ASSUMPTIONS, BENCHMARKS, EXAMPLE_STORE, FT_MONTHLY_HOURS,
+                    MIN_HOURLY_WAGE_2026, MIN_MONTHLY_WAGE_2026, MOS_THRESHOLD, RAMP_MONTHS,
+                    TAX_RATES, Plan, evaluate, fmt_money, pct_text)
 
 st.set_page_config(page_title="餐飲單店創業前財務風險評估", layout="wide")
 
@@ -63,8 +63,7 @@ def months(x: float) -> str:
     return "—" if math.isnan(x) else f"{x:,.1f} 個月"
 
 
-def pct(x: float) -> str:
-    return "—" if not math.isfinite(x) else f"{x:.1%}"
+pct = pct_text
 
 
 # ---------------------------------------------------------------------------
@@ -117,12 +116,13 @@ with st.sidebar:
                         key="owner_alt_wage")
 
     with st.expander("F 養店期", expanded=True):
-        st.caption("第 1–6 個月營業額占穩定期的百分比，第 7 個月起為 100%。")
+        st.caption(f"第 1–{RAMP_MONTHS} 個月營業額占穩定期的百分比，"
+                   f"第 {RAMP_MONTHS + 1} 個月起為 100%。")
+        st.warning("預設值來自作者單一門市經驗，請依自身情況調整。")
         cols = st.columns(3)
-        for i in range(6):
+        for i in range(RAMP_MONTHS):
             cols[i % 3].number_input(f"第 {i + 1} 月（%）", 0.0, 100.0, step=5.0,
                                      key=f"ramp_{i}")
-        st.caption("養店期預設值依作者實際經營經驗校準，可自行調整。")
 
     with st.expander("進階設定"):
         st.number_input("資金機會成本年利率（%）", 0.0, 20.0, step=0.1, key="capital_rate",
@@ -145,7 +145,7 @@ plan = Plan(
     pt_wage=ss.pt_wage, pt_hours=ss.pt_hours, owner_hours=ss.owner_hours,
     rent=ss.rent, utilities=ss.utilities, other_fixed=ss.other_fixed,
     capital=ss.capital, contract_years=ss.contract_years, owner_alt_wage=ss.owner_alt_wage,
-    ramp=[ss[f"ramp_{i}"] / 100 for i in range(6)],
+    ramp=[ss[f"ramp_{i}"] / 100 for i in range(RAMP_MONTHS)],
     capital_rate=ss.capital_rate / 100,
     ft_multiplier=ss.ft_multiplier, pt_multiplier=ss.pt_multiplier,
 )
@@ -172,7 +172,7 @@ with st.container(border=True):
     st.subheader("結論")
     show = {"可行": st.success, "可行，但獲利偏低": st.warning,
             "不建議": st.error, "不可行": st.error}[r.verdict]
-    show(f"**{r.verdict}**　{r.verdict_reason}")
+    show(f"**{r.verdict_sentence}**")
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("穩定期每月現金淨利", money(r.cash_profit))
     m2.metric("現金利益率", pct(r.cash_margin),
@@ -181,13 +181,15 @@ with st.container(border=True):
     m3.metric("損益兩平營業額", money(r.breakeven_revenue)
               if math.isfinite(r.breakeven_revenue) else "無法損益兩平")
     m4.metric("含養店期回本", months(r.payback_months))
-    with st.expander("判斷表（由上往下，符合第一個就停止）"):
-        hit = r.steps.index(next(s for s in r.steps if s.passed))
+    with st.expander("判斷表", expanded=True):
+        mark = {"通過": "✓ 通過", "未通過": "✗ 未通過", "略過": "略過"}
         st.dataframe(pd.DataFrame([
-            {"條件": s.name,
-             "結果": ("➜ 符合，停止" if i == hit else "不符合") if i <= hit else "未檢查",
-             "說明": s.detail} for i, s in enumerate(r.steps)]),
+            {"檢查項目": c.name, "本計畫": c.actual, "標準": c.standard,
+             "結果": mark[c.status]} for c in r.criteria]),
             hide_index=True, width="stretch")
+        st.caption("結論規則：第 1 項未通過為「不可行」；第 1 項通過、第 2 項未通過為「不建議」；"
+                   "只有第 3 項未通過為「可行，但獲利偏低」；全部通過為「可行」。"
+                   "租約未填時第 2 項略過，不影響結論。")
 
 left, right = st.columns(2)
 
@@ -273,12 +275,12 @@ with left2:
     b2.metric("不含養店期回本", months(r.stable_payback_months), help="僅供對照")
     b3.metric("租約月數", f"{r.contract_months:,.0f} 個月" if r.contract_months else "未填")
     sched = pd.DataFrame(
-        [(f"第 {m} 月" if m <= 6 else f"第 {m} 月起", rev, profit, cum)
+        [(f"第 {m} 月" if m <= RAMP_MONTHS else f"第 {m} 月起", rev, profit, cum)
          for m, rev, profit, cum in r.ramp_schedule],
         columns=["月份", "營業額（元）", "現金淨利（元）", "累計現金淨利（元）"])
     st.dataframe(sched.style.format({c: fmt_money for c in sched.columns[1:]}),
                  hide_index=True, width="stretch")
-    st.caption("養店期預設值依作者實際經營經驗校準，可自行調整。"
+    st.caption("養店期預設值來自作者單一門市經驗，請依自身情況調整。"
                "累計現金淨利達到啟動資金的月份即為回本月數，以內插法計算。")
 
 # 6. 風險說明
@@ -295,3 +297,9 @@ with right2:
 st.caption(f"法規參數：2026 年基本工資月薪 {MIN_MONTHLY_WAGE_2026:,} 元、時薪 "
            f"{MIN_HOURLY_WAGE_2026} 元。安全邊際提示門檻 {MOS_THRESHOLD:.0%} 為設計預設值，"
            "非官方標準。")
+
+with st.expander("假設與資料來源"):
+    st.dataframe(pd.DataFrame(ASSUMPTIONS, columns=["類別", "項目", "數值", "來源與說明"]),
+                 hide_index=True, width="stretch")
+    st.caption("公開資料：政府統計；法規：現行法令與公告；設計假設：本工具的預設值，"
+               "非官方標準；作者經驗：作者單一門市的經營數字。")
