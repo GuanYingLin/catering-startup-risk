@@ -291,17 +291,19 @@ with left:
 # 成本結構明細（長條圖的數字）
 with right:
     st.subheader("成本結構明細")
-    rows = []
-    for g in r.cost_gaps:
-        lo, hi = bench[g.key][1:]
-        rows.append({"項目": g.name, "本計畫": g.ratio, "產業平均": g.bench_avg,
-                     "差距": f"{g.gap * 100:+.1f} 個百分點", "產業歷年區間": f"{lo:.1%}–{hi:.1%}"})
-    avg, lo, hi = bench["pre_dep_margin"]
-    rows.append({"項目": "營業淨利率（折舊前）", "本計畫": r.cash_margin,
-                 "產業平均": avg, "差距": f"{(r.cash_margin - avg) * 100:+.1f} 個百分點",
-                 "產業歷年區間": f"{lo:.1%}–{hi:.1%}"})
+    # 欄名與項目名稱用短版（同長條圖），產業歷年區間移到表下說明，手機上才看得到「差距」
+    detail_rows = ([(chart_labels[g.key], g.key, g.ratio) for g in r.cost_gaps]
+                   + [("營業淨利率（折舊前）", "pre_dep_margin", r.cash_margin)])
+    rows, ranges = [], []
+    for label, key, mine in detail_rows:
+        avg, lo, hi = bench[key]
+        rows.append({"項目": label, "本計畫": mine, "產業平均": avg,
+                     "差距": f"{(mine - avg) * 100:+.1f}"})
+        ranges.append(f"{label} {lo:.1%}–{hi:.1%}")
     st.dataframe(pd.DataFrame(rows).style.format({"本計畫": "{:.1%}", "產業平均": "{:.1%}"}),
                  hide_index=True, width="stretch")
+    st.caption("差距＝本計畫 − 產業平均，單位為百分點（依未四捨五入的比率計算）。"
+               f"產業歷年區間：{'；'.join(ranges)}。")
 
 # SPLH 區間
 st.subheader("人力與 SPLH（每工時營業額）")
