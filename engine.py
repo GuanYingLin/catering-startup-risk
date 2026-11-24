@@ -63,6 +63,12 @@ def default_ramp(months: int) -> list[float]:
 
 # 結論與 SPLH 區間的名稱（engine 與畫面共用，改字只改這裡）
 VERDICTS = ("不可行", "不建議", "可行，但獲利偏低", "可行")
+
+# 頁尾資訊
+AUTHOR = "林冠穎"
+GITHUB_URL = "https://github.com/GuanYingLin/catering-startup-risk"
+DATA_UPDATED = "2026-11-25"  # 產業數據、法規參數與查證資料的最後更新日
+DISCLAIMER = "本工具為開店前試算，不構成投資或財務建議。"
 SPLH_ZONES = ("虧損", "獲利偏低", "健康", "人力吃緊")
 
 # 產業「營業利益率 + 折舊率」在畫面上的名稱（官方統計名稱見假設與資料來源表）
@@ -78,7 +84,8 @@ def _bench_text(t: tuple[float, float, float]) -> str:
     return f"平均 {t[0]:.2%}（歷年 {t[1]:.2%}–{t[2]:.2%}）"
 
 
-_MOEA = "經濟部統計處「批發、零售及餐飲業經營實況調查」2018–2024 六個調查年（2021 普查年無資料）"
+_MOEA = ("經濟部統計處「批發、零售及餐飲業經營實況調查」2018–2024 六個調查年（2021 普查年無資料）；"
+         "以營業額加權，大型業者影響較大")
 _BENCH_NAMES = {"food": "食材成本率", "labor": "人事成本率", "rent": "租金率",
                 "pre_dep_margin": "營業淨利率（折舊前）"}
 
@@ -568,6 +575,98 @@ def evaluate(p: Plan) -> Result:
                                                  ("人事（員工薪資）", labor_cost),
                                                  ("月租金", p.rent)) if value == 0],
     )
+
+
+# ---------------------------------------------------------------------------
+# 計算明細：把畫面上的主要數字拆成算式（金額與畫面其他地方用同一套四捨五入）
+# ---------------------------------------------------------------------------
+
+def _num(x: float) -> str:
+    """輸入值顯示：千分位，最多兩位小數，去掉多餘的 0。"""
+    return f"{x:,.2f}".rstrip("0").rstrip(".")
+
+
+def _rate(x: float) -> str:
+    """比率顯示：最多兩位小數，去掉多餘的 0（35.75%、1.5%、33%）。"""
+    return _num(x * 100) + "%"
+
+
+def calculation_details(p: Plan, r: Result) -> list[tuple[str, list[str]]]:
+    """回傳 [(區塊標題, [每一行算式])]，供畫面「計算明細」逐項顯示。"""
+    bench = BENCHMARKS[p.industry]
+    rev = r.revenue
+    sections = []
+
+    sections.append(("營業額", [
+        f"平日：{_num(p.weekday_ticket)} 元 × {_num(p.weekday_customers)} 人 × "
+        f"{_num(p.weekday_days)} 天 = {fmt_yuan(p.weekday_ticket * p.weekday_customers * p.weekday_days)}",
+        f"假日：{_num(p.weekend_ticket)} 元 × {_num(p.weekend_customers)} 人 × "
+        f"{_num(p.weekend_days)} 天 = {fmt_yuan(p.weekend_ticket * p.weekend_customers * p.weekend_days)}",
+        f"合計：{fmt_yuan(rev)}",
+    ]))
+
+    tax_rate = TAX_RATES[p.tax_type]
+    sections.append(("變動成本", [
+        f"食材：{fmt_yuan(rev)} × {_rate(p.food_rate)} = {fmt_yuan(rev * p.food_rate)}",
+        f"包材：{fmt_yuan(rev)} × {_rate(p.packaging_rate)} = {fmt_yuan(rev * p.packaging_rate)}",
+        f"外送抽成：{fmt_yuan(rev)} × 外送占比 {_rate(p.delivery_share)} × 抽成 "
+        f"{_rate(p.delivery_commission)} = {fmt_yuan(rev * p.delivery_share * p.delivery_commission)}",
+        f"營業稅：{fmt_yuan(rev)} × {_rate(tax_rate)} = {fmt_yuan(rev * tax_rate)}",
+        f"合計：{fmt_yuan(rev * r.variable_rate)}（變動成本率 {_rate(round(r.variable_rate, 6))}，"
+        f"邊際貢獻率 {r.cm_rate:.2%}）",
+    ]))
+
+    labor = [f"正職 {i}：{_num(s)} 元 × {p.ft_multiplier:.2f} = {fmt_yuan(s * p.ft_multiplier)}"
+             for i, s in enumerate(p.ft_salaries, start=1)]
+    if p.pt_hours or p.pt_wage:
+        labor.append(f"兼職：時薪 {_num(p.pt_wage)} 元 × {_num(p.pt_hours)} 小時 × "
+                     f"{p.pt_multiplier:.2f} = {fmt_yuan(p.pt_wage * p.pt_hours * p.pt_multiplier)}")
+    if not labor:
+        labor.append("沒有員工")
+    labor.append(f"合計：{fmt_yuan(r.labor_cost)}（倍數為雇主法定負擔，見假設與資料來源）")
+    sections.append(("人事", labor))
+
+    sections.append(("固定成本", [
+        f"人事：{fmt_yuan(r.labor_cost)}",
+        f"租金：{fmt_yuan(p.rent)}",
+        f"水電瓦斯：{fmt_yuan(p.utilities)}",
+        f"其他固定費用：{fmt_yuan(p.other_fixed)}",
+        f"合計：{fmt_yuan(r.fixed_cost)}",
+        f"營業淨利（折舊前）＝ 營業額 {fmt_yuan(rev)} − 變動成本 {fmt_yuan(rev * r.variable_rate)}"
+        f" − 固定成本 {fmt_yuan(r.fixed_cost)} = {fmt_yuan(r.cash_profit)}",
+    ]))
+
+    sections.append(("機會成本", [
+        f"老闆去上班的月薪：{fmt_yuan(p.owner_alt_wage)}",
+        f"資金利息：啟動資金 {fmt_yuan(p.capital)} × 年利率 {_rate(p.capital_rate)} ÷ 12 = "
+        f"{fmt_yuan(p.capital * p.capital_rate / 12)}",
+        f"合計：{fmt_yuan(r.opportunity_cost)}；經濟淨利 ＝ {fmt_yuan(r.cash_profit)} − "
+        f"{fmt_yuan(r.opportunity_cost)} = {fmt_yuan(r.economic_profit)}",
+    ]))
+
+    h = r.total_hours
+    hours = f"{_num(h)} 小時"
+    lo_margin, avg_margin = bench["pre_dep_margin"][1], bench["pre_dep_margin"][0]
+    splh = [
+        f"總工時：正職 {len(p.ft_salaries)} 人 × {FT_MONTHLY_HOURS} 小時 + 兼職 {_num(p.pt_hours)} 小時"
+        f" + 老闆 {_num(p.owner_hours)} 小時 = {hours}",
+    ]
+    if not h:
+        splh.append("總工時為 0，無法計算 SPLH。")
+    else:
+        splh += [
+            f"本計畫 SPLH ＝ 營業額 {fmt_yuan(rev)} ÷ {hours} = {fmt_yuan(r.splh)}",
+            f"損益平衡 SPLH ＝ 固定成本 {fmt_yuan(r.fixed_cost)} ÷ 邊際貢獻率 {r.cm_rate:.2%}"
+            f" ÷ {hours} = {fmt_yuan(r.splh_breakeven)}",
+            f"健康下限 ＝ 固定成本 {fmt_yuan(r.fixed_cost)} ÷（邊際貢獻率 {r.cm_rate:.2%} − "
+            f"{INDUSTRY_MARGIN_NAME}歷年最低 {lo_margin:.2%}）÷ {hours} = {fmt_yuan(r.splh_healthy)}",
+            f"產業平均水準 ＝ 固定成本 {fmt_yuan(r.fixed_cost)} ÷（邊際貢獻率 {r.cm_rate:.2%} − "
+            f"{INDUSTRY_MARGIN_NAME}平均 {avg_margin:.2%}）÷ {hours} = {fmt_yuan(r.splh_industry)}",
+            f"人力吃緊上限 ＝ 人事 {fmt_yuan(r.labor_cost)} ÷ {hours} ÷ 產業人事成本率歷年最低 "
+            f"{bench['labor'][1]:.2%} = {fmt_yuan(r.splh_strained)}",
+        ]
+    sections.append(("SPLH 四個門檻", splh))
+    return sections
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from engine import (CASES, EXAMPLE_STORE, NO_CAPITAL_TEXT, VERDICTS, Plan,  # noqa: E402
-                    default_ramp, evaluate, fmt_money, fmt_months)
+                    calculation_details, default_ramp, evaluate, fmt_money, fmt_months)
 
 
 @pytest.fixture
@@ -193,3 +193,31 @@ def test_formatting():
     assert fmt_money(float("nan")) == "—"
     assert fmt_months(float("inf")) == "無法回本"
     assert fmt_months(18.94) == "18.9 個月"
+
+
+# ---------------------------------------------------------------------------
+# 計算明細
+# ---------------------------------------------------------------------------
+
+def test_calculation_details(example):
+    r = evaluate(example)
+    d = dict(calculation_details(example, r))
+    assert list(d) == ["營業額", "變動成本", "人事", "固定成本", "機會成本", "SPLH 四個門檻"]
+    assert "平日：146 元 × 104 人 × 14 天 = 212,576 元" in d["營業額"]
+    assert "假日：190 元 × 122 人 × 8.5 天 = 197,030 元" in d["營業額"]
+    assert "食材：409,606 元 × 35.75% = 146,434 元" in d["變動成本"]
+    assert "正職 1：45,000 元 × 1.20 = 54,000 元" in d["人事"]
+    assert "兼職：時薪 200 元 × 108.33 小時 × 1.20 = 26,000 元" in d["人事"]
+    assert "合計：177,717 元" in d["固定成本"]
+    assert any(line.endswith("= 69,132 元") for line in d["固定成本"])
+    assert "資金利息：啟動資金 900,000 元 × 年利率 1.7% ÷ 12 = 1,275 元" in d["機會成本"]
+    splh = " ".join(d["SPLH 四個門檻"])
+    for value in ("= 890 元", "= 641 元", "= 787 元", "= 840 元", "= 1,236 元"):
+        assert value in splh
+
+
+def test_calculation_details_zero_hours(example):
+    p = replace(example, ft_salaries=[], pt_hours=0, pt_wage=0)
+    d = dict(calculation_details(p, evaluate(p)))
+    assert "沒有員工" in d["人事"]
+    assert "總工時為 0，無法計算 SPLH。" in d["SPLH 四個門檻"]

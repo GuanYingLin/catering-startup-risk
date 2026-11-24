@@ -9,10 +9,11 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from engine import (ASSUMPTIONS, BENCHMARKS, CASES, FT_MONTHLY_HOURS, INDUSTRY_MARGIN_NAME,
+from engine import (ASSUMPTIONS, AUTHOR, BENCHMARKS, CASES, DATA_UPDATED, DISCLAIMER,
+                    FT_MONTHLY_HOURS, GITHUB_URL, INDUSTRY_MARGIN_NAME,
                     MIN_HOURLY_WAGE_2026, MIN_MONTHLY_WAGE_2026, MOS_THRESHOLD, RAMP_DEFAULT,
-                    RAMP_MAX_MONTHS, SPLH_ZONES, TAX_RATES, VERDICTS, Plan, evaluate, fmt_money,
-                    fmt_yuan, pct_text)
+                    RAMP_MAX_MONTHS, SPLH_ZONES, TAX_RATES, VERDICTS, Plan, calculation_details,
+                    evaluate, fmt_money, fmt_yuan, pct_text)
 
 st.set_page_config(page_title="餐飲單店創業前財務風險評估", layout="wide")
 
@@ -21,7 +22,7 @@ PCT_KEYS = {"food_rate", "packaging_rate", "delivery_share", "delivery_commissio
 MAX_FT = 10
 
 # 「成本結構與產業平均」長條圖配色（配合簡報替換時只改這兩個）
-COLOR_PLAN = "#2F6B4F"  # 本計畫：深綠
+COLOR_PLAN = "#1F5C46"  # 本計畫：深綠（與簡報強調色一致）
 COLOR_BENCHMARK = "#948E82"  # 產業平均：暖灰
 
 # 輸入欄位上限：設計預設值，只為擋掉明顯打錯的數字（例如多打幾個 0）
@@ -85,6 +86,14 @@ for _k, _v in ui_values().items():
     st.session_state.setdefault(_k, _v)
 
 
+def footer():
+    """頁尾：作者、GitHub、資料更新日期、免責聲明。"""
+    st.divider()
+    st.caption(f"作者：{AUTHOR}｜GitHub：[{GITHUB_URL.removeprefix('https://')}]({GITHUB_URL})"
+               f"｜資料更新：{DATA_UPDATED}")
+    st.caption(DISCLAIMER)
+
+
 # ---------------------------------------------------------------------------
 # 輸入（側欄）
 # ---------------------------------------------------------------------------
@@ -95,53 +104,73 @@ with st.sidebar:
     st.header("創業計畫")
 
     st.selectbox("業別", list(BENCHMARKS), key="industry")
+    ref = BENCHMARKS[st.session_state.industry]  # 欄位說明裡的產業參考值（依所選業別）
+    ref_name = st.session_state.industry
 
     with st.expander("A 營收（穩定期）", expanded=True):
         c1, c2 = st.columns(2)
         c1.caption("平日")
         c2.caption("假日")
-        c1.number_input("客單價（元）", 0.0, INPUT_MAX["ticket"], step=5.0, key="weekday_ticket")
+        help_ticket = "每位客人平均消費金額（含外帶、外送）。"
+        help_customers = "每天的客人數（含外帶、外送）。"
+        help_days = ("每月營業天數拆成平日與假日。一個月約 4.3 週：假日（週六、日）約 8.5 天；"
+                     "平日約 21.5 天，每週公休一天就再扣約 4.3 天（約 17 天）。")
+        c1.number_input("客單價（元）", 0.0, INPUT_MAX["ticket"], step=5.0, key="weekday_ticket",
+                        help=help_ticket)
         c2.number_input("客單價（元） ", 0.0, INPUT_MAX["ticket"], step=5.0,
-                        key="weekend_ticket")
+                        key="weekend_ticket", help=help_ticket)
         c1.number_input("每日來客數", 0.0, INPUT_MAX["customers"], step=5.0,
-                        key="weekday_customers")
+                        key="weekday_customers", help=help_customers)
         c2.number_input("每日來客數 ", 0.0, INPUT_MAX["customers"], step=5.0,
-                        key="weekend_customers")
-        c1.number_input("每月天數", 0.0, 31.0, step=0.5, key="weekday_days")
-        c2.number_input("每月天數 ", 0.0, 31.0, step=0.5, key="weekend_days")
+                        key="weekend_customers", help=help_customers)
+        c1.number_input("每月天數", 0.0, 31.0, step=0.5, key="weekday_days", help=help_days)
+        c2.number_input("每月天數 ", 0.0, 31.0, step=0.5, key="weekend_days", help=help_days)
 
     with st.expander("B 變動成本", expanded=True):
         st.caption("變動成本：跟著營業額等比例增減的成本。")
-        st.number_input("食材成本率（%）", 0.0, 100.0, step=0.5, key="food_rate")
+        st.number_input("食材成本率（%）", 0.0, 100.0, step=0.5, key="food_rate",
+                        help=f"食材進貨 ÷ 營業額。{ref_name}產業平均約 {ref['food'][0]:.0%}"
+                             f"（歷年 {ref['food'][1]:.1%}–{ref['food'][2]:.1%}）。")
         st.number_input("包材率（%，已含在食材內填 0）", 0.0, 100.0, step=0.5,
                         key="packaging_rate")
-        st.number_input("外送占營收（%）", 0.0, 100.0, step=0.5, key="delivery_share")
-        st.number_input("外送平台抽成（%）", 0.0, 100.0, step=1.0, key="delivery_commission")
+        st.number_input("外送占營收（%）", 0.0, 100.0, step=0.5, key="delivery_share",
+                        help="外送平台訂單占營業額的比例；沒有外送填 0。")
+        st.number_input("外送平台抽成（%）", 0.0, 100.0, step=1.0, key="delivery_commission",
+                        help="外送平台向店家收取的抽成，依平台合約填寫（作者門市為 33%）。")
         st.selectbox("營業稅類型", list(TAX_RATES), key="tax_type")
 
     st.caption("這裡只填員工；老闆自己的收入看營業淨利。")
     with st.expander("C 人力", expanded=True):
+        st.caption(f"{ref_name}產業人事成本率平均約 {ref['labor'][0]:.1%}（含法定負擔，"
+                   "占營業額）。")
         ft_count = int(st.number_input("正職人數", 0, MAX_FT, step=1, key="ft_count"))
         for i in range(ft_count):
             st.number_input(f"正職 {i + 1} 月薪（元）", 0.0, INPUT_MAX["ft_salary"],
-                            step=1000.0, key=f"ft_{i}")
-        st.number_input("兼職時薪（元）", 0.0, INPUT_MAX["pt_wage"], step=5.0, key="pt_wage")
+                            step=1000.0, key=f"ft_{i}",
+                            help=f"不可低於 2026 年基本工資 {MIN_MONTHLY_WAGE_2026:,} 元。")
+        st.number_input("兼職時薪（元）", 0.0, INPUT_MAX["pt_wage"], step=5.0, key="pt_wage",
+                        help=f"不可低於 2026 年基本時薪 {MIN_HOURLY_WAGE_2026} 元。")
         st.number_input("兼職每月總工時（小時）", 0.0, INPUT_MAX["pt_hours"], step=10.0,
-                        key="pt_hours")
+                        key="pt_hours",
+                        help="所有兼職人員一個月的工時加總。"
+                             "例如每週 25 小時：25 × 52 ÷ 12 ≈ 108 小時。")
         st.number_input("老闆每月在店工時（小時）", 0.0, INPUT_MAX["owner_hours"], step=10.0,
                         key="owner_hours", help="算進總工時（影響 SPLH），不算進人事成本")
 
     with st.expander("D 固定費用", expanded=True):
-        st.number_input("月租金（元）", 0.0, INPUT_MAX["rent"], step=1000.0, key="rent")
+        st.number_input("月租金（元）", 0.0, INPUT_MAX["rent"], step=1000.0, key="rent",
+                        help=f"{ref_name}產業租金平均約占營業額 {ref['rent'][0]:.1%}。")
         st.number_input("每月水電瓦斯（元）", 0.0, INPUT_MAX["utilities"], step=500.0,
-                        key="utilities")
+                        key="utilities", help="每月水費、電費、瓦斯費合計。")
         st.number_input("其他固定費用（元／月）", 0.0, INPUT_MAX["other_fixed"], step=500.0,
-                        key="other_fixed")
+                        key="other_fixed",
+                        help="不隨營業額變動的每月支出，例如網路、POS 月費、記帳、保險、清潔。")
 
     with st.expander("E 投資", expanded=True):
         st.number_input("啟動資金（元）", 0.0, INPUT_MAX["capital"], step=10000.0,
-                        key="capital")
-        st.number_input("租約或加盟合約年限（年）", 0.0, 20.0, step=0.5, key="contract_years")
+                        key="capital", help="開店前一次投入的總額：裝潢、設備、加盟金、押金等。")
+        st.number_input("租約或加盟合約年限（年）", 0.0, 20.0, step=0.5, key="contract_years",
+                        help="用來判斷能否在約滿前回本；沒有租約填 0，第 2 項檢查會略過。")
         st.number_input("老闆不開店、去上班的月薪（元）", 0.0, INPUT_MAX["owner_alt_wage"],
                         step=1000.0, key="owner_alt_wage",
                         help="如果不開店、改去上班，每月大約能領多少薪水。系統會從營業淨利中扣除"
@@ -208,8 +237,25 @@ st.caption("在左側欄輸入你的計畫或切換案例（手機請點左上�
 r = evaluate(plan)
 bench = BENCHMARKS[plan.industry]
 
+if ss.case == CUSTOM_CASE:
+    # 自行輸入模式：最少要填的欄位，填好的打勾
+    todo = [
+        ("A 營收：平日、假日的客單價、來客數、每月天數", r.revenue > 0),
+        ("B 變動成本：食材成本率", plan.food_rate > 0),
+        ("C 人力：至少一位員工（正職月薪，或兼職時薪與工時）", r.labor_cost > 0),
+        ("D 固定費用：月租金", plan.rent > 0),
+        ("E 投資：啟動資金與租約年限", plan.capital > 0 and plan.contract_years > 0),
+    ]
+    if not all(done for _, done in todo):
+        st.info("**最少要填（在左側欄）**\n" + "\n".join(
+            f"- {'✓' if done else '☐'} {item}" for item, done in todo)
+            + "\n\n其他欄位可先用預設值。不知道怎麼填？可以先在「案例」選單選作者門市，"
+              "再把數字改成自己的。欄位旁的問號有說明與參考值。")
+
 if r.revenue <= 0:
-    st.info("請在左側輸入創業計畫，或在「案例」選單選擇一個案例。")
+    if ss.case != CUSTOM_CASE:
+        st.info("請在左側輸入創業計畫，或在「案例」選單選擇一個案例。")
+    footer()
     st.stop()
 
 # ===========================================================================
@@ -232,9 +278,10 @@ mark = {"通過": "✓ 通過", "未通過": "✗ 未通過", "略過": "略過"
 st.dataframe(pd.DataFrame([
     {"檢查項目": c.name, "結果": mark[c.status], "本計畫": c.actual, "標準": c.standard}
     for c in r.criteria]), hide_index=True, width="stretch")
-st.caption("結論規則：第 1 項未通過為「不可行」；第 1 項通過、第 2 項未通過為「不建議」；"
-           "只有第 3 項未通過為「可行，但獲利偏低」；全部通過為「可行」。"
-           "租約未填時第 2 項略過，不影響結論。")
+with st.expander("結論規則"):
+    st.markdown("第 1 項未通過為「不可行」；第 1 項通過、第 2 項未通過為「不建議」；"
+                "只有第 3 項未通過為「可行，但獲利偏低」；全部通過為「可行」。"
+                "租約未填時第 2 項略過，不影響結論。")
 
 # 三句白話重點
 st.markdown("\n".join(f"{i}. {h}" for i, h in enumerate(r.highlights, start=1)))
@@ -267,15 +314,18 @@ labels = base.mark_text(align="left", baseline="middle", dx=4, fontSize=12,
                         color=label_color).encode(
     text=alt.Text("標籤:N"))
 st.altair_chart((bars + labels).properties(height=300), width="stretch")
-st.caption(f"產業數據：經濟部經營實況調查，{plan.industry}，2018–2024 六個調查年平均，"
-           f"以營業額加權，大型業者影響較大。營業淨利率（折舊前）對照的是{INDUSTRY_MARGIN_NAME}"
-           "（經濟部統計的營業利益率 + 折舊率）。")
+st.caption("資料來源：經濟部經營實況調查 2018–2024")
 
 # ===========================================================================
 # 計算依據
 # ===========================================================================
 st.divider()
 st.header("計算依據")
+
+with st.expander("計算明細：每個數字怎麼算出來"):
+    for title, lines in calculation_details(plan, r):
+        st.markdown(f"**{title}**\n" + "\n".join(f"- {line}" for line in lines))
+    st.caption("各項金額四捨五入到元；合計以未四捨五入的金額計算，與各項加總可能差 1 元。")
 
 left, right = st.columns(2)
 
@@ -383,3 +433,5 @@ with st.expander("假設與資料來源"):
     st.caption(f"法規參數：2026 年基本工資月薪 {MIN_MONTHLY_WAGE_2026:,} 元、時薪 "
                f"{MIN_HOURLY_WAGE_2026} 元。安全邊際提示門檻 {MOS_THRESHOLD:.0%} 為設計預設值，"
                "非官方標準。")
+
+footer()
