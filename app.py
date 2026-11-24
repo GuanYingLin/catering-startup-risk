@@ -166,14 +166,13 @@ with st.sidebar:
     with st.expander("進階設定"):
         st.number_input("資金機會成本年利率（%）", 0.0, 20.0, step=0.1, key="capital_rate",
                         help="啟動資金如果不拿來開店、改放銀行，每年大約能賺的利率。"
-                             "假設值，待查證後更新。")
+                             "預設為臺灣銀行一年期定期存款一般牌告固定利率 1.70%（2026）。")
         st.number_input("正職法定負擔倍數", 1.0, 2.0, step=0.01, key="ft_multiplier",
                         help="雇主除了薪水，還要負擔勞保、健保、勞退、職保。"
                              "1.20 代表每付 100 元薪水，店家實際成本約 120 元。")
         st.number_input("兼職法定負擔倍數", 1.0, 2.0, step=0.01, key="pt_multiplier",
-                        help="雇主除了時薪，還要負擔勞保、健保、勞退等。"
-                             "1.11 代表每付 100 元時薪，店家實際成本約 111 元。"
-                             "假設值，待依投保級距查證。")
+                        help="兼職的勞保、勞退依實際薪資投保，職保有最低級距；健保若由店家投保，"
+                             "負擔更高。依投保方式約 1.16–1.26，預設取 1.20。")
 
 ss = st.session_state
 plan = Plan(
@@ -218,7 +217,7 @@ for c in r.legal_checks:
         st.error(f"**法規未通過：{c.name}**（{c.detail}）。此項不改變結論，但必須修正。")
 if r.missing_inputs:
     st.warning(f"以下欄位為 0，可能尚未填寫：{'、'.join(r.missing_inputs)}。"
-               "結論可能過於樂觀，請確認。")
+               "結論可能過於樂觀，請確認；若確實為 0，可忽略此提醒。")
 
 # 結論一行
 show = dict(zip(VERDICTS, (st.error, st.error, st.warning, st.success)))[r.verdict]
@@ -271,18 +270,20 @@ with left:
     st.subheader("月損益表（穩定期）")
     pnl = pd.DataFrame([
         ("營業額", r.revenue),
-        ("− 變動成本（食材、包材、外送抽成、營業稅）", -r.revenue * r.variable_rate),
+        ("− 變動成本", -r.revenue * r.variable_rate),
         ("＝ 邊際貢獻", r.contribution),
-        ("− 人事成本（含法定負擔）", -r.labor_cost),
+        ("− 人事", -r.labor_cost),
         ("− 租金", -plan.rent),
-        ("− 水電瓦斯與其他", -(plan.utilities + plan.other_fixed)),
+        ("− 水電與其他", -(plan.utilities + plan.other_fixed)),
         ("＝ 營業淨利（折舊前）", r.cash_profit),
-        ("− 機會成本（老闆去上班的月薪、資金利息）", -r.opportunity_cost),
+        ("− 機會成本", -r.opportunity_cost),
         ("＝ 經濟淨利", r.economic_profit),
-    ], columns=["項目", "每月金額（元）"])
-    st.dataframe(pnl.style.format({"每月金額（元）": fmt_money}), hide_index=True,
+    ], columns=["項目", "每月（元）"])
+    st.dataframe(pnl.style.format({"每月（元）": fmt_money}), hide_index=True,
                  width="stretch")
-    st.caption("變動成本：跟著營業額等比例增減的成本。"
+    st.caption("變動成本：食材、包材、外送抽成、營業稅，跟著營業額等比例增減。"
+               "人事：員工薪資含勞健保等法定負擔。水電與其他：水電瓦斯與其他固定費用。"
+               "機會成本：老闆去上班的月薪與啟動資金的利息。"
                "邊際貢獻：營業額扣掉變動成本後，拿來支付人事、租金等固定費用的錢；"
                f"邊際貢獻率 {r.cm_rate:.2%}，代表每 100 元營業額留下 {r.cm_rate * 100:.1f} 元。"
                "經濟淨利大於 0，代表開店比去上班划算。採現金基礎，不攤提啟動資金。")

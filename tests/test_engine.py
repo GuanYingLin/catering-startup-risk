@@ -27,14 +27,16 @@ def example() -> Plan:
 def test_example_acceptance_numbers(example):
     r = evaluate(example)
     assert round(r.cm_rate, 4) == 0.6027
-    assert fmt_money(r.cash_profit) == "71,082"
-    assert round(r.cash_margin, 3) == 0.174
-    assert fmt_money(r.breakeven_revenue) == "291,657"
-    assert round(r.margin_of_safety, 3) == 0.288
-    assert r.payback_months == 18.9
+    assert fmt_money(r.cash_profit) == "69,132"
+    assert round(r.cash_margin, 3) == 0.169
+    assert fmt_money(r.breakeven_revenue) == "294,893"
+    assert round(r.margin_of_safety, 3) == 0.280
+    assert r.payback_months == 19.4
+    assert r.stable_payback_months == 13.0
     assert fmt_money(r.splh) == "890"
-    assert fmt_money(r.splh_healthy) == "778"
-    assert fmt_money(r.splh_strained) == "1,217"
+    assert fmt_money(r.splh_breakeven) == "641"
+    assert fmt_money(r.splh_healthy) == "787"
+    assert fmt_money(r.splh_strained) == "1,236"
     assert r.splh_zone == "健康"
     assert r.verdict == "可行"
     assert r.verdict_sentence == "可行：三項檢查全部通過"
@@ -48,9 +50,9 @@ def test_example_is_registered_as_case():
 
 def test_example_highlights(example):
     s1, s2, s3 = evaluate(example).highlights
-    assert s1.startswith("穩定期營業淨利（折舊前）每月 71,082 元")
-    assert "18.9 個月回本" in s1 and "比 36 個月租約提早 17.1 個月" in s1
-    assert "890 元" in s2 and "「健康」區間（778–1,217 元）" in s2
+    assert s1.startswith("穩定期營業淨利（折舊前）每月 69,132 元")
+    assert "19.4 個月回本" in s1 and "比 36 個月租約提早 16.6 個月" in s1
+    assert "890 元" in s2 and "「健康」區間（787–1,236 元）" in s2
     assert "人事成本率高出產業平均最多" in s3 and "食材成本率（含包材）完全抵銷" in s3
 
 
@@ -72,7 +74,7 @@ def test_verdicts(example, changes, verdict):
 
 def test_payback_equal_to_contract_passes(example):
     """第 2 項標準為「不超過租約」：回本月數等於租約月數仍算通過。"""
-    r = evaluate(replace(example, contract_years=18.9 / 12))
+    r = evaluate(replace(example, contract_years=19.4 / 12))
     assert r.criteria[1].status == "通過"
 
 
@@ -93,7 +95,7 @@ def test_verdict_names_come_from_constant():
 
 def test_highlight_payback_exceeds_contract(example):
     s1 = evaluate(replace(example, contract_years=1)).highlights[0]
-    assert "超過 12 個月租約 6.9 個月" in s1
+    assert "超過 12 個月租約 7.4 個月" in s1
 
 
 def test_highlight_partial_offset_and_low_profit_zone(example):
@@ -124,7 +126,7 @@ def test_highlight_strained_zone(example):
 
 def test_no_ramp_equals_stable_payback(example):
     r = evaluate(replace(example, ramp=[]))
-    assert r.payback_months == r.stable_payback_months == 12.7
+    assert r.payback_months == r.stable_payback_months == 13.0
 
 
 def test_default_ramp_extends_last_month():

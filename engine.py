@@ -41,9 +41,9 @@ TAX_RATES = {
 }
 
 FT_MULTIPLIER = 1.20  # 正職雇主法定負擔：勞保、健保、勞退、職保，2026 年約 19.8%
-PT_MULTIPLIER = 1.11  # 兼職雇主法定負擔：假設值，待依投保級距查證
+PT_MULTIPLIER = 1.20  # 兼職雇主法定負擔：依投保方式約 1.16–1.26，取 1.20（勞動部、健保署 2026 年費率）
 FT_MONTHLY_HOURS = 176  # 正職每月工時（每週 40 小時 × 4.4 週）
-CAPITAL_RATE = 0.017  # 資金機會成本年利率：假設值，待查證
+CAPITAL_RATE = 0.017  # 資金機會成本年利率：臺灣銀行一年期定期存款一般牌告固定利率（2026）
 MOS_THRESHOLD = 0.20  # 安全邊際提示門檻：設計預設值，只用於風險說明，不影響結論
 
 SENSITIVITY_DROPS = (0.10, 0.20)  # 營業額下滑情境：設計預設值
@@ -96,12 +96,14 @@ ASSUMPTIONS: list[tuple[str, str, str, str]] = [
     ("法規", "正職法定負擔倍數", f"{FT_MULTIPLIER:.2f}",
      "依勞保、就保、健保、勞退（雇主提繳 6%）、職保的雇主負擔估算，2026 年約 19.8%；"
      "以投保薪資等於月薪計，實際依投保級距略有差異。可在進階設定調整"),
-    ("設計假設", "兼職法定負擔倍數", f"{PT_MULTIPLIER:.2f}",
-     "假設值，待依投保級距查證。可在進階設定調整"),
+    ("法規", "兼職法定負擔倍數", f"{PT_MULTIPLIER:.2f}",
+     "已查證（勞動部、健保署 2026 年費率）。兼職的勞保、勞退依實際薪資投保，職保有最低級距；"
+     "健保若由店家投保，負擔更高。依投保方式約 1.16–1.26，預設取 1.20。可在進階設定調整"),
     ("設計假設", "正職每月工時", f"{FT_MONTHLY_HOURS} 小時",
      "每週 40 小時（勞動基準法第 30 條正常工時上限）× 每月 4.4 週"),
     ("設計假設", "資金機會成本年利率", f"{CAPITAL_RATE:.1%}",
-     "假設值，約為銀行一年期定存利率，待查證。可在進階設定調整"),
+     "已查證：臺灣銀行一年期定期存款一般牌告固定利率 1.70%（2026）。"
+     "以定存利率代表啟動資金不開店時的報酬。可在進階設定調整"),
     ("設計假設", "安全邊際提示門檻", f"{MOS_THRESHOLD:.0%}",
      "設計預設值，非官方標準；只用於風險說明，不影響結論"),
     ("設計假設", "營業額下滑情境", "、".join(f"−{d:.0%}" for d in SENSITIVITY_DROPS),
@@ -503,7 +505,7 @@ def evaluate(p: Plan) -> Result:
                   (f"不超過租約 {contract_months:,.0f} 個月" if contract_months
                    else "租約未填"), status(payback_ok)),
         Criterion("③ 獲利是否達業界水準", f"營業淨利率（折舊前）{pct_text(cash_margin)}",
-                  f"至少 {min_margin:.1%}（{p.industry}{INDUSTRY_MARGIN_NAME}歷年最低值）",
+                  f"至少 {min_margin:.1%}（{p.industry}歷年最低值）",
                   status(margin_ok)),
     ]
     not_viable, not_advised, low_profit, viable = VERDICTS
