@@ -10,8 +10,8 @@ import pandas as pd
 import streamlit as st
 
 from engine import (ASSUMPTIONS, BENCHMARKS, EXAMPLE_STORE, FT_MONTHLY_HOURS,
-                    MIN_HOURLY_WAGE_2026, MIN_MONTHLY_WAGE_2026, MOS_THRESHOLD, RAMP_MONTHS,
-                    TAX_RATES, Plan, evaluate, fmt_money, pct_text)
+                    MIN_HOURLY_WAGE_2026, MIN_MONTHLY_WAGE_2026, MOS_THRESHOLD, RAMP_DEFAULT,
+                    RAMP_MAX_MONTHS, TAX_RATES, Plan, evaluate, fmt_money, pct_text)
 
 st.set_page_config(page_title="餐飲單店創業前財務風險評估", layout="wide")
 
@@ -32,7 +32,9 @@ def ui_values(overrides: dict | None = None) -> dict:
     state["ft_count"] = len(ft)
     for i in range(MAX_FT):
         state[f"ft_{i}"] = float(ft[i]) if i < len(ft) else 0.0
-    for i, share in enumerate(values.pop("ramp")):
+    ramp = values.pop("ramp")
+    state["ramp_months"] = len(ramp)
+    for i, share in enumerate(ramp):
         state[f"ramp_{i}"] = round(share * 100, 2)
     for k, v in values.items():
         if isinstance(v, str):
@@ -45,6 +47,8 @@ def ui_values(overrides: dict | None = None) -> dict:
 
 
 def load_example():
+    for i in range(RAMP_MAX_MONTHS):  # 清掉舊的養店期月份，避免沿用先前輸入
+        st.session_state.pop(f"ramp_{i}", None)
     st.session_state.update(ui_values(EXAMPLE_STORE))
 
 
@@ -116,13 +120,23 @@ with st.sidebar:
                         key="owner_alt_wage")
 
     with st.expander("F 養店期", expanded=True):
-        st.caption(f"第 1–{RAMP_MONTHS} 個月營業額占穩定期的百分比，"
-                   f"第 {RAMP_MONTHS + 1} 個月起為 100%。")
+        ramp_months = int(st.number_input("養店期長度（月）", 0, RAMP_MAX_MONTHS, step=1,
+                                          key="ramp_months",
+                                          help="0 代表沒有養店期，第 1 個月起即為穩定期營業額"))
+        if ramp_months:
+            st.caption(f"第 1–{ramp_months} 個月營業額占穩定期的百分比，"
+                       f"第 {ramp_months + 1} 個月起為 100%。")
+        else:
+            st.caption("沒有養店期：第 1 個月起即為穩定期營業額。")
         st.warning("預設值來自作者單一門市經驗，請依自身情況調整。")
         cols = st.columns(3)
-        for i in range(RAMP_MONTHS):
-            cols[i % 3].number_input(f"第 {i + 1} 月（%）", 0.0, 100.0, step=5.0,
-                                     key=f"ramp_{i}")
+        for i in range(ramp_months):
+            key = f"ramp_{i}"
+            if key not in st.session_state:
+                # 前 6 個月用預設值；第 7 個月之後沿用前一個月（即第 6 個月起的值）
+                st.session_state[key] = (round(RAMP_DEFAULT[i] * 100, 2) if i < len(RAMP_DEFAULT)
+                                         else st.session_state[f"ramp_{i - 1}"])
+            cols[i % 3].number_input(f"第 {i + 1} 月（%）", 0.0, 100.0, step=5.0, key=key)
 
     with st.expander("進階設定"):
         st.number_input("資金機會成本年利率（%）", 0.0, 20.0, step=0.1, key="capital_rate",
@@ -145,7 +159,7 @@ plan = Plan(
     pt_wage=ss.pt_wage, pt_hours=ss.pt_hours, owner_hours=ss.owner_hours,
     rent=ss.rent, utilities=ss.utilities, other_fixed=ss.other_fixed,
     capital=ss.capital, contract_years=ss.contract_years, owner_alt_wage=ss.owner_alt_wage,
-    ramp=[ss[f"ramp_{i}"] / 100 for i in range(RAMP_MONTHS)],
+    ramp=[ss[f"ramp_{i}"] / 100 for i in range(ramp_months)],
     capital_rate=ss.capital_rate / 100,
     ft_multiplier=ss.ft_multiplier, pt_multiplier=ss.pt_multiplier,
 )
@@ -275,7 +289,7 @@ with left2:
     b2.metric("不含養店期回本", months(r.stable_payback_months), help="僅供對照")
     b3.metric("租約月數", f"{r.contract_months:,.0f} 個月" if r.contract_months else "未填")
     sched = pd.DataFrame(
-        [(f"第 {m} 月" if m <= RAMP_MONTHS else f"第 {m} 月起", rev, profit, cum)
+        [(f"第 {m} 月" if m <= len(plan.ramp) else f"第 {m} 月起", rev, profit, cum)
          for m, rev, profit, cum in r.ramp_schedule],
         columns=["月份", "營業額（元）", "現金淨利（元）", "累計現金淨利（元）"])
     st.dataframe(sched.style.format({c: fmt_money for c in sched.columns[1:]}),

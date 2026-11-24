@@ -48,10 +48,17 @@ MOS_THRESHOLD = 0.20  # 安全邊際提示門檻：設計預設值，只用於�
 
 SENSITIVITY_DROPS = (0.10, 0.20)  # 營業額下滑情境：設計預設值
 
-# 養店期：第 1–6 個月營業額占穩定期的比例，第 7 個月起 100%
-# 預設值與期間長度皆來自作者單一門市經驗
+# 養店期：各月營業額占穩定期的比例，養店期結束後為 100%
+# 預設長度 6 個月、各月比例皆來自作者單一門市經驗；長度可調 0–12 個月（0 = 沒有養店期）
+# 超過 6 個月時，第 7 個月之後預設沿用第 6 個月的比例
 RAMP_DEFAULT = (0.60, 0.60, 0.70, 0.70, 0.80, 0.80)
-RAMP_MONTHS = len(RAMP_DEFAULT)
+RAMP_DEFAULT_MONTHS = len(RAMP_DEFAULT)
+RAMP_MAX_MONTHS = 12
+
+
+def default_ramp(months: int) -> list[float]:
+    """長度為 months 的預設養店期比例；超過預設長度的月份沿用最後一個月。"""
+    return [RAMP_DEFAULT[min(i, RAMP_DEFAULT_MONTHS - 1)] for i in range(months)]
 
 VERDICTS = ("不可行", "不建議", "可行，但獲利偏低", "可行")
 SPLH_ZONES = ("虧損", "獲利偏低", "健康", "人力吃緊")
@@ -97,11 +104,12 @@ ASSUMPTIONS: list[tuple[str, str, str, str]] = [
      "取產業數據的歷年最低值作為最低可接受水準，而非平均值"),
     ("設計假設", "「人力吃緊上限」門檻", "人事成本率歷年最低值",
      "人事成本率低於產業歷年最低，視為人手可能不足"),
-    ("作者經驗", f"養店期第 1–{RAMP_MONTHS} 個月營業額比例",
+    ("作者經驗", f"養店期第 1–{RAMP_DEFAULT_MONTHS} 個月預設營業額比例",
      "、".join(f"{s:.0%}" for s in RAMP_DEFAULT),
-     "作者單一門市經驗，請依自身情況調整"),
-    ("作者經驗", "養店期長度", f"{RAMP_MONTHS} 個月（第 {RAMP_MONTHS + 1} 個月起 100%）",
-     f"作者單一門市經驗；目前程式固定為 {RAMP_MONTHS} 個月，畫面無法調整"),
+     f"作者單一門市經驗，請依自身情況調整；第 {RAMP_DEFAULT_MONTHS + 1} 個月之後"
+     f"預設沿用第 {RAMP_DEFAULT_MONTHS} 個月的值"),
+    ("作者經驗", "養店期預設長度", f"{RAMP_DEFAULT_MONTHS} 個月",
+     f"作者單一門市經驗，可調整為 0–{RAMP_MAX_MONTHS} 個月（0 代表沒有養店期）"),
     ("作者經驗", "範例門市數字", "按「載入範例」帶入",
      "作者經營的早午餐加盟門市 2025/04–2026/03 實際數字；只作範例，不進入計算公式"),
 ]
@@ -141,7 +149,7 @@ class Plan:
     contract_years: float = 0.0
     owner_alt_wage: float = 0.0
     # F 養店期
-    ramp: list[float] = field(default_factory=lambda: list(RAMP_DEFAULT))
+    ramp: list[float] = field(default_factory=lambda: default_ramp(RAMP_DEFAULT_MONTHS))
     # 進階設定
     capital_rate: float = CAPITAL_RATE
     ft_multiplier: float = FT_MULTIPLIER
