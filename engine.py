@@ -60,8 +60,13 @@ def default_ramp(months: int) -> list[float]:
     """長度為 months 的預設養店期比例；超過預設長度的月份沿用最後一個月。"""
     return [RAMP_DEFAULT[min(i, RAMP_DEFAULT_MONTHS - 1)] for i in range(months)]
 
+
+# 結論與 SPLH 區間的名稱（engine 與畫面共用，改字只改這裡）
 VERDICTS = ("不可行", "不建議", "可行，但獲利偏低", "可行")
 SPLH_ZONES = ("虧損", "獲利偏低", "健康", "人力吃緊")
+
+# 產業「營業利益率 + 折舊率」在畫面上的名稱（官方統計名稱見假設與資料來源表）
+INDUSTRY_MARGIN_NAME = "產業營業淨利率（折舊前）"
 
 
 # ---------------------------------------------------------------------------
@@ -75,11 +80,12 @@ def _bench_text(t: tuple[float, float, float]) -> str:
 
 _MOEA = "經濟部統計處「批發、零售及餐飲業經營實況調查」2018–2024 六個調查年（2021 普查年無資料）"
 _BENCH_NAMES = {"food": "食材成本率", "labor": "人事成本率", "rent": "租金率",
-                "pre_dep_margin": "折舊前營業利益率"}
+                "pre_dep_margin": "營業淨利率（折舊前）"}
 
 ASSUMPTIONS: list[tuple[str, str, str, str]] = [
     *[("公開資料", f"{ind}{_BENCH_NAMES[k]}", _bench_text(v),
-       _MOEA + ("；營業利益率 + 折舊率" if k == "pre_dep_margin" else ""))
+       _MOEA + ("；= 營業利益率 + 折舊率（原始統計名稱：營業利益率、折舊率）"
+                if k == "pre_dep_margin" else ""))
       for ind, items in BENCHMARKS.items() for k, v in items.items()],
     ("法規", "基本工資（月薪）", f"{MIN_MONTHLY_WAGE_2026:,} 元", "勞動部公告，2026-01-01 起生效"),
     ("法規", "基本工資（時薪）", f"{MIN_HOURLY_WAGE_2026} 元", "勞動部公告，2026-01-01 起生效"),
@@ -100,7 +106,7 @@ ASSUMPTIONS: list[tuple[str, str, str, str]] = [
      "設計預設值，非官方標準；只用於風險說明，不影響結論"),
     ("設計假設", "營業額下滑情境", "、".join(f"−{d:.0%}" for d in SENSITIVITY_DROPS),
      "設計預設值；只用於風險說明，不影響結論"),
-    ("設計假設", "「業界水準」與「健康下限」門檻", "折舊前營業利益率歷年最低值",
+    ("設計假設", "「業界水準」與「健康下限」門檻", f"{INDUSTRY_MARGIN_NAME}歷年最低值",
      "取產業數據的歷年最低值作為最低可接受水準，而非平均值"),
     ("設計假設", "「人力吃緊上限」門檻", "人事成本率歷年最低值",
      "人事成本率低於產業歷年最低，視為人手可能不足"),
@@ -110,7 +116,7 @@ ASSUMPTIONS: list[tuple[str, str, str, str]] = [
      f"預設沿用第 {RAMP_DEFAULT_MONTHS} 個月的值"),
     ("作者經驗", "養店期預設長度", f"{RAMP_DEFAULT_MONTHS} 個月",
      f"作者單一門市經驗，可調整為 0–{RAMP_MAX_MONTHS} 個月（0 代表沒有養店期）"),
-    ("作者經驗", "範例門市數字", "按「載入範例」帶入",
+    ("作者經驗", "範例門市數字", "在「案例」選單選擇作者門市",
      "作者經營的早午餐加盟門市 2025/04–2026/03 實際數字；只作範例，不進入計算公式"),
 ]
 
@@ -222,6 +228,9 @@ class Result:
     verdict_sentence: str  # 白話結論，例如「可行：三項檢查全部通過」
     risks: list[str]
     highlights: list[str]  # 重點摘要的三句白話重點，依計算結果產生
+    payback_text: str  # 含養店期回本月數的顯示文字
+    stable_payback_text: str  # 不含養店期回本月數的顯示文字
+    missing_inputs: list[str]  # 主要成本欄位為 0（可能尚未填寫）的項目名稱
 
 
 def _safe_div(a: float, b: float) -> float:
@@ -235,8 +244,34 @@ def fmt_money(x: float | None) -> str:
     return f"{round(x) or 0:,}"
 
 
+def fmt_yuan(x: float | None) -> str:
+    """金額加上「元」；無法計算時顯示「—」。"""
+    s = fmt_money(x)
+    return s if s == "—" else f"{s} 元"
+
+
 def pct_text(x: float) -> str:
     return "—" if not math.isfinite(x) else f"{x:.1%}"
+
+
+def fmt_months(x: float) -> str:
+    """月數取一位小數；無法回本（inf）顯示「無法回本」，nan 顯示「—」。"""
+    if math.isinf(x):
+        return "無法回本"
+    return "—" if math.isnan(x) else f"{x:,.1f} 個月"
+
+
+NO_CAPITAL_TEXT = "沒有啟動資金，無需回本"
+
+
+def validate(p: Plan) -> None:
+    """檢查輸入：金額、人數、工時、比率都不可為負數，否則拋出 ValueError。"""
+    numeric = {k: v for k, v in vars(p).items() if isinstance(v, (int, float))}
+    bad = [k for k, v in numeric.items() if v < 0]
+    bad += [f"ft_salaries[{i}]" for i, v in enumerate(p.ft_salaries) if v < 0]
+    bad += [f"ramp[{i}]" for i, v in enumerate(p.ramp) if v < 0]
+    if bad:
+        raise ValueError(f"以下欄位不可為負數：{', '.join(bad)}")
 
 
 def payback_with_ramp(capital: float, revenue: float, cm_rate: float, fixed_cost: float,
@@ -268,36 +303,39 @@ def payback_with_ramp(capital: float, revenue: float, cm_rate: float, fixed_cost
     return round(payback, 1), schedule
 
 
-def _months_text(x: float) -> str:
-    return f"{x:,.1f} 個月"
-
-
 def _highlights(cash_profit: float, payback_months: float, contract_months: float,
-                splh: float, splh_zone: str, splh_breakeven: float, splh_healthy: float,
-                splh_strained: float, cost_gaps: list[CostGap]) -> list[str]:
+                capital: float, splh: float, splh_zone: str, splh_breakeven: float,
+                splh_healthy: float, splh_strained: float,
+                cost_gaps: list[CostGap]) -> list[str]:
     """重點摘要的三句白話重點：獲利與回本、SPLH 區間、成本結構。"""
-    # 第 1 句：每月營業淨利（折舊前）與含養店期回本月數，並與租約比較
+    # 第 1 句：穩定期營業淨利（折舊前）與含養店期回本月數，並與租約比較
     if cash_profit <= 0:
-        s1 = (f"每月營業淨利（折舊前）{fmt_money(cash_profit)} 元，營運不賺錢，"
+        s1 = (f"穩定期營業淨利（折舊前）每月 {fmt_money(cash_profit)} 元，營運不賺錢，"
               "累計營業淨利（折舊前）永遠追不上啟動資金，無法回本。")
+    elif capital <= 0:
+        s1 = f"穩定期營業淨利（折舊前）每月 {fmt_money(cash_profit)} 元；{NO_CAPITAL_TEXT}。"
     else:
-        s1 = (f"每月營業淨利（折舊前）{fmt_money(cash_profit)} 元，"
-              f"含養店期約 {_months_text(payback_months)}回本")
+        s1 = (f"穩定期營業淨利（折舊前）每月 {fmt_money(cash_profit)} 元，"
+              f"含養店期約 {fmt_months(payback_months)}回本")
         if not contract_months:
             s1 += "；租約未填，無法和租約比較。"
         else:
             diff = contract_months - payback_months
             contract = f"{contract_months:,.0f} 個月租約"
             if diff > 0:
-                s1 += f"，比 {contract}提早 {_months_text(diff)}。"
+                s1 += f"，比 {contract}提早 {fmt_months(diff)}。"
             elif diff == 0:
                 s1 += f"，剛好等於 {contract}，沒有緩衝。"
             else:
-                s1 += f"，超過 {contract} {_months_text(-diff)}，租約到期前回不了本。"
+                s1 += f"，超過 {contract} {fmt_months(-diff)}，租約到期前回不了本。"
 
     # 第 2 句：SPLH 落在哪個區間，附上區間範圍
     if math.isnan(splh):
         s2 = "總工時為 0，無法計算 SPLH。"
+    elif not math.isfinite(splh_breakeven):
+        s2 = (f"每工時營業額（SPLH）{fmt_money(splh)} 元，落在「{SPLH_ZONES[0]}」區間："
+              "變動成本已吃掉全部營業額（邊際貢獻 ≤ 0），賣越多虧越多，"
+              "營業額再高也付不起固定成本。")
     else:
         ranges = {
             "虧損": f"低於損益平衡 {fmt_money(splh_breakeven)} 元",
@@ -337,6 +375,7 @@ def _highlights(cash_profit: float, payback_months: float, contract_months: floa
 
 
 def evaluate(p: Plan) -> Result:
+    validate(p)
     bench = BENCHMARKS[p.industry]
 
     # 1. 月營業額（穩定期）
@@ -361,7 +400,7 @@ def evaluate(p: Plan) -> Result:
     opportunity_cost = p.owner_alt_wage + p.capital * p.capital_rate / 12
     economic_profit = cash_profit - opportunity_cost
 
-    # 5. 損益兩平與安全邊際
+    # 5. 損益平衡與安全邊際
     breakeven_revenue = fixed_cost / cm_rate if cm_rate > 0 else float("inf")
     margin_of_safety = (_safe_div(revenue - breakeven_revenue, revenue)
                         if math.isfinite(breakeven_revenue) else float("nan"))
@@ -379,16 +418,17 @@ def evaluate(p: Plan) -> Result:
     splh_industry = _safe_div(revenue_for_margin(bench["pre_dep_margin"][0]), total_hours)
     splh_strained = _safe_div(_safe_div(labor_cost, total_hours), bench["labor"][1])
 
+    loss, low, healthy, strained = SPLH_ZONES
     if math.isnan(splh):
         splh_zone = "—"
     elif not splh >= splh_breakeven:
-        splh_zone = "虧損"
+        splh_zone = loss
     elif not splh >= splh_healthy:
-        splh_zone = "獲利偏低"
+        splh_zone = low
     elif splh > splh_strained:
-        splh_zone = "人力吃緊"
+        splh_zone = strained
     else:
-        splh_zone = "健康"
+        splh_zone = healthy
 
     # 7. 回本（含養店期）
     contract_months = p.contract_years * 12
@@ -396,6 +436,9 @@ def evaluate(p: Plan) -> Result:
                                                       fixed_cost, p.ramp)
     stable_payback_months = (round(p.capital / cash_profit, 1) if cash_profit > 0
                              else float("inf"))
+    no_capital = p.capital <= 0 and cash_profit > 0
+    payback_text = NO_CAPITAL_TEXT if no_capital else fmt_months(payback_months)
+    stable_payback_text = NO_CAPITAL_TEXT if no_capital else fmt_months(stable_payback_months)
 
     # 8. 成本結構
     food_total_rate = p.food_rate + p.packaging_rate
@@ -444,8 +487,6 @@ def evaluate(p: Plan) -> Result:
     # 結論規則：第 1 項未通過 → 不可行；第 1 項通過、第 2 項未通過 → 不建議；
     # 只有第 3 項未通過 → 可行，但獲利偏低；全部通過（第 2 項可略過）→ 可行
     min_margin = bench["pre_dep_margin"][1]
-    payback_text = ("無法回本" if math.isinf(payback_months)
-                    else f"{payback_months:,.1f} 個月")
     profit_ok = cash_profit > 0
     payback_ok = (None if not contract_months
                   else payback_months <= contract_months)  # None = 略過
@@ -455,29 +496,32 @@ def evaluate(p: Plan) -> Result:
         return "略過" if ok is None else ("通過" if ok else "未通過")
 
     criteria = [
-        Criterion("① 營運是否賺錢", f"營業淨利（折舊前）{fmt_money(cash_profit)} 元／月",
+        Criterion("① 營運是否賺錢", f"穩定期營業淨利（折舊前）{fmt_money(cash_profit)} 元／月",
                   "大於 0 元", status(profit_ok)),
-        Criterion("② 能否在租約內回本", f"含養店期回本 {payback_text}",
+        Criterion("② 能否在租約內回本",
+                  payback_text if no_capital else f"含養店期回本 {payback_text}",
                   (f"不超過租約 {contract_months:,.0f} 個月" if contract_months
                    else "租約未填"), status(payback_ok)),
         Criterion("③ 獲利是否達業界水準", f"營業淨利率（折舊前）{pct_text(cash_margin)}",
-                  f"至少 {min_margin:.1%}（{p.industry}折舊前營業利益率歷年最低值）",
+                  f"至少 {min_margin:.1%}（{p.industry}{INDUSTRY_MARGIN_NAME}歷年最低值）",
                   status(margin_ok)),
     ]
+    not_viable, not_advised, low_profit, viable = VERDICTS
     if not profit_ok:
-        verdict, verdict_sentence = "不可行", "不可行：營運不賺錢，每月營業淨利（折舊前）未大於 0"
+        verdict = not_viable
+        verdict_sentence = f"{not_viable}：營運不賺錢，穩定期營業淨利（折舊前）未大於 0"
     elif payback_ok is False:
-        verdict = "不建議"
-        verdict_sentence = (f"不建議：無法在租約內回本（含養店期回本 {payback_text}，"
+        verdict = not_advised
+        verdict_sentence = (f"{not_advised}：無法在租約內回本（含養店期回本 {payback_text}，"
                             f"租約 {contract_months:,.0f} 個月）")
     elif not margin_ok:
-        verdict = "可行，但獲利偏低"
-        verdict_sentence = "可行，但獲利偏低：營運賺錢" + (
+        verdict = low_profit
+        verdict_sentence = f"{low_profit}：營運賺錢" + (
             "、能在租約內回本" if payback_ok else "") + "，但營業淨利率（折舊前）未達業界水準"
     else:
-        verdict = "可行"
-        verdict_sentence = ("可行：三項檢查全部通過" if payback_ok
-                            else "可行：其餘檢查全部通過（租約未填，回本檢查略過）")
+        verdict = viable
+        verdict_sentence = (f"{viable}：三項檢查全部通過" if payback_ok
+                            else f"{viable}：其餘檢查全部通過（租約未填，回本檢查略過）")
 
     # ---------------- 風險說明（只說明，不影響結論） ----------------
     risks: list[str] = []
@@ -494,12 +538,12 @@ def evaluate(p: Plan) -> Result:
         risks.append(f"安全邊際偏低：{mos}，低於 {MOS_THRESHOLD:.0%}。")
     for label, _, profit in sensitivity[1:]:
         risks.append(f"{label} 時，每月營業淨利（折舊前）為 {fmt_money(profit)} 元。")
-    if splh_zone == "人力吃緊":
+    if splh_zone == strained:
         risks.append(f"SPLH 進入人力吃緊區：{fmt_money(splh)} 元，高於上限 {fmt_money(splh_strained)} 元，"
                      "人手可能不足以支撐預估營業額。")
     if economic_profit < 0:
         risks.append(f"經濟淨利為負：每月 {fmt_money(economic_profit)} 元，"
-                     "扣除老闆替代月薪與資金利息後，不如去上班。")
+                     "扣除老闆去上班的月薪與資金利息後，不如去上班。")
 
     return Result(
         revenue=revenue, variable_rate=variable_rate, cm_rate=cm_rate,
@@ -514,8 +558,13 @@ def evaluate(p: Plan) -> Result:
         ratios=ratios, cost_gaps=cost_gaps, sensitivity=sensitivity,
         legal_checks=legal_checks, criteria=criteria, verdict=verdict,
         verdict_sentence=verdict_sentence, risks=risks,
-        highlights=_highlights(cash_profit, payback_months, contract_months, splh, splh_zone,
-                               splh_breakeven, splh_healthy, splh_strained, cost_gaps),
+        highlights=_highlights(cash_profit, payback_months, contract_months, p.capital, splh,
+                               splh_zone, splh_breakeven, splh_healthy, splh_strained,
+                               cost_gaps),
+        payback_text=payback_text, stable_payback_text=stable_payback_text,
+        missing_inputs=[name for name, value in (("食材成本率", p.food_rate),
+                                                 ("人事（員工薪資）", labor_cost),
+                                                 ("月租金", p.rent)) if value == 0],
     )
 
 
