@@ -221,6 +221,7 @@ class Result:
     verdict: str
     verdict_sentence: str  # 白話結論，例如「可行：三項檢查全部通過」
     risks: list[str]
+    highlights: list[str]  # 重點摘要的三句白話重點，依計算結果產生
 
 
 def _safe_div(a: float, b: float) -> float:
@@ -265,6 +266,74 @@ def payback_with_ramp(capital: float, revenue: float, cm_rate: float, fixed_cost
         months_done = len(ramp) + 1
         payback = months_done + (capital - cum) / stable_profit
     return round(payback, 1), schedule
+
+
+def _months_text(x: float) -> str:
+    return f"{x:,.1f} 個月"
+
+
+def _highlights(cash_profit: float, payback_months: float, contract_months: float,
+                splh: float, splh_zone: str, splh_breakeven: float, splh_healthy: float,
+                splh_strained: float, cost_gaps: list[CostGap]) -> list[str]:
+    """重點摘要的三句白話重點：獲利與回本、SPLH 區間、成本結構。"""
+    # 第 1 句：每月現金淨利與含養店期回本月數，並與租約比較
+    if cash_profit <= 0:
+        s1 = (f"穩定期每月現金淨利 {fmt_money(cash_profit)} 元，營運不賺錢，"
+              "累計現金淨利永遠追不上啟動資金，無法回本。")
+    else:
+        s1 = (f"穩定期每月現金淨利 {fmt_money(cash_profit)} 元，"
+              f"含養店期約 {_months_text(payback_months)}回本")
+        if not contract_months:
+            s1 += "；租約未填，無法和租約比較。"
+        else:
+            diff = contract_months - payback_months
+            contract = f"{contract_months:,.0f} 個月租約"
+            if diff > 0:
+                s1 += f"，比 {contract}提早 {_months_text(diff)}。"
+            elif diff == 0:
+                s1 += f"，剛好等於 {contract}，沒有緩衝。"
+            else:
+                s1 += f"，超過 {contract} {_months_text(-diff)}，租約到期前回不了本。"
+
+    # 第 2 句：SPLH 落在哪個區間，附上區間範圍
+    if math.isnan(splh):
+        s2 = "總工時為 0，無法計算 SPLH。"
+    else:
+        ranges = {
+            "虧損": f"低於損益平衡 {fmt_money(splh_breakeven)} 元",
+            "獲利偏低": f"{fmt_money(splh_breakeven)}–{fmt_money(splh_healthy)} 元",
+            "健康": f"{fmt_money(splh_healthy)}–{fmt_money(splh_strained)} 元",
+            "人力吃緊": f"高於 {fmt_money(splh_strained)} 元",
+        }
+        meaning = {
+            "虧損": "每工時營業額不足以支付成本",
+            "獲利偏低": "會賺錢，但獲利率低於業界最低水準",
+            "健康": "人力與營業額相稱",
+            "人力吃緊": "人手可能撐不住預估營業額",
+        }
+        s2 = (f"每工時營業額（SPLH）{fmt_money(splh)} 元，落在「{splh_zone}」區間"
+              f"（{ranges[splh_zone]}），{meaning[splh_zone]}。")
+
+    # 第 3 句：高於產業平均最多的成本項目，以及是否被其他項目抵銷
+    above = max(cost_gaps, key=lambda g: g.gap)
+    below = min(cost_gaps, key=lambda g: g.gap)
+    total = sum(g.gap for g in cost_gaps)
+    total_text = (f"三項合計比產業平均{'高' if total > 0 else '低'} "
+                  f"{abs(total) * 100:.1f} 個百分點")
+    if above.gap <= 0:
+        s3 = (f"三項成本率都不高於產業平均，其中{below.name}最低，"
+              f"比平均低 {-below.gap * 100:.1f} 個百分點；{total_text}。")
+    else:
+        s3 = (f"成本結構中，{above.name}高出產業平均最多"
+              f"（本計畫 {above.ratio:.1%}，平均 {above.bench_avg:.1%}，"
+              f"高 {above.gap * 100:.1f} 個百分點）")
+        if below.gap < 0:
+            verb = "完全抵銷" if total <= 0 else "部分抵銷"
+            s3 += (f"，但被{below.name}{verb}（低於平均 {-below.gap * 100:.1f} 個百分點），"
+                   f"{total_text}。")
+        else:
+            s3 += f"，沒有其他項目低於平均可以抵銷，{total_text}。"
+    return [s1, s2, s3]
 
 
 def evaluate(p: Plan) -> Result:
@@ -445,6 +514,8 @@ def evaluate(p: Plan) -> Result:
         ratios=ratios, cost_gaps=cost_gaps, sensitivity=sensitivity,
         legal_checks=legal_checks, criteria=criteria, verdict=verdict,
         verdict_sentence=verdict_sentence, risks=risks,
+        highlights=_highlights(cash_profit, payback_months, contract_months, splh, splh_zone,
+                               splh_breakeven, splh_healthy, splh_strained, cost_gaps),
     )
 
 
@@ -465,4 +536,13 @@ EXAMPLE_STORE = {
     "owner_hours": 0,
     "rent": 33_000, "utilities": 12_217, "other_fixed": 4_500,
     "capital": 900_000, "contract_years": 3, "owner_alt_wage": 0,
+}
+
+# ---------------------------------------------------------------------------
+# 案例清單：畫面「案例」選單的選項。新增案例時，在上方定義一個 dict（欄位同 Plan，
+# 未列出的欄位使用 Plan 預設值），再加到這裡即可。
+# ---------------------------------------------------------------------------
+
+CASES: dict[str, dict] = {
+    "作者門市（2025/04–2026/03）": EXAMPLE_STORE,
 }

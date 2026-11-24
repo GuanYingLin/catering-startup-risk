@@ -9,7 +9,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from engine import (ASSUMPTIONS, BENCHMARKS, EXAMPLE_STORE, FT_MONTHLY_HOURS,
+from engine import (ASSUMPTIONS, BENCHMARKS, CASES, FT_MONTHLY_HOURS,
                     MIN_HOURLY_WAGE_2026, MIN_MONTHLY_WAGE_2026, MOS_THRESHOLD, RAMP_DEFAULT,
                     RAMP_MAX_MONTHS, TAX_RATES, Plan, evaluate, fmt_money, pct_text)
 
@@ -46,12 +46,21 @@ def ui_values(overrides: dict | None = None) -> dict:
     return state
 
 
-def load_example():
+CUSTOM_CASE = "自行輸入"
+CASE_OPTIONS = [*CASES, CUSTOM_CASE]  # 新增案例請改 engine.CASES，這裡不用動
+
+
+def apply_case():
+    """依「案例」選單重設所有欄位：選案例時載入該案例，選自行輸入時清空。"""
     for i in range(RAMP_MAX_MONTHS):  # 清掉舊的養店期月份，避免沿用先前輸入
         st.session_state.pop(f"ramp_{i}", None)
-    st.session_state.update(ui_values(EXAMPLE_STORE))
+    case = st.session_state.case
+    st.session_state.update(ui_values(None if case == CUSTOM_CASE else CASES[case]))
 
 
+if "case" not in st.session_state:  # 第一次開啟：預設載入第一個案例
+    st.session_state.case = CASE_OPTIONS[0]
+    apply_case()
 for _k, _v in ui_values().items():
     st.session_state.setdefault(_k, _v)
 
@@ -74,9 +83,10 @@ pct = pct_text
 # 輸入（側欄）
 # ---------------------------------------------------------------------------
 with st.sidebar:
+    st.selectbox("案例", CASE_OPTIONS, key="case", on_change=apply_case,
+                 help="選擇案例會載入該案例的數字；選「自行輸入」會清空所有欄位。"
+                      "載入後仍可修改任何欄位。")
     st.header("創業計畫")
-    st.button("載入範例：作者門市（2025/04–2026/03）", on_click=load_example,
-              width="stretch")
 
     st.selectbox("業別", list(BENCHMARKS), key="industry")
 
@@ -175,39 +185,65 @@ r = evaluate(plan)
 bench = BENCHMARKS[plan.industry]
 
 if r.revenue <= 0:
-    st.info("請在左側輸入創業計畫，或按「載入範例」。")
+    st.info("請在左側輸入創業計畫，或在「案例」選單選擇一個案例。")
     st.stop()
 
-# 1. 結論卡
-with st.container(border=True):
-    for c in r.legal_checks:
-        if not c.passed:
-            st.error(f"**法規未通過：{c.name}**（{c.detail}）。此項不改變結論，但必須修正。")
-    st.subheader("結論")
-    show = {"可行": st.success, "可行，但獲利偏低": st.warning,
-            "不建議": st.error, "不可行": st.error}[r.verdict]
-    show(f"**{r.verdict_sentence}**")
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("穩定期每月現金淨利", money(r.cash_profit))
-    m2.metric("現金利益率", pct(r.cash_margin),
-              help=f"{plan.industry}折舊前營業利益率：平均 {bench['pre_dep_margin'][0]:.1%}，"
-                   f"歷年最低 {bench['pre_dep_margin'][1]:.1%}")
-    m3.metric("損益兩平營業額", money(r.breakeven_revenue)
-              if math.isfinite(r.breakeven_revenue) else "無法損益兩平")
-    m4.metric("含養店期回本", months(r.payback_months))
-    with st.expander("判斷表", expanded=True):
-        mark = {"通過": "✓ 通過", "未通過": "✗ 未通過", "略過": "略過"}
-        st.dataframe(pd.DataFrame([
-            {"檢查項目": c.name, "本計畫": c.actual, "標準": c.standard,
-             "結果": mark[c.status]} for c in r.criteria]),
-            hide_index=True, width="stretch")
-        st.caption("結論規則：第 1 項未通過為「不可行」；第 1 項通過、第 2 項未通過為「不建議」；"
-                   "只有第 3 項未通過為「可行，但獲利偏低」；全部通過為「可行」。"
-                   "租約未填時第 2 項略過，不影響結論。")
+# ===========================================================================
+# 重點摘要
+# ===========================================================================
+st.header("重點摘要")
+for c in r.legal_checks:
+    if not c.passed:
+        st.error(f"**法規未通過：{c.name}**（{c.detail}）。此項不改變結論，但必須修正。")
+
+# 結論一行
+show = {"可行": st.success, "可行，但獲利偏低": st.warning,
+        "不建議": st.error, "不可行": st.error}[r.verdict]
+show(f"**{r.verdict_sentence}**")
+
+# 三項檢查表
+mark = {"通過": "✓ 通過", "未通過": "✗ 未通過", "略過": "略過"}
+st.dataframe(pd.DataFrame([
+    {"檢查項目": c.name, "本計畫": c.actual, "標準": c.standard, "結果": mark[c.status]}
+    for c in r.criteria]), hide_index=True, width="stretch")
+st.caption("結論規則：第 1 項未通過為「不可行」；第 1 項通過、第 2 項未通過為「不建議」；"
+           "只有第 3 項未通過為「可行，但獲利偏低」；全部通過為「可行」。"
+           "租約未填時第 2 項略過，不影響結論。")
+
+# 三句白話重點
+st.markdown("\n".join(f"{i}. {h}" for i, h in enumerate(r.highlights, start=1)))
+
+# 成本結構對照長條圖
+st.subheader("成本結構與產業平均")
+chart_labels = {"food": "食材（含包材）", "labor": "人事", "rent": "租金"}
+chart_rows = ([(chart_labels[g.key], g.ratio, g.bench_avg) for g in r.cost_gaps]
+              + [("現金利益率", r.cash_margin, bench["pre_dep_margin"][0])])
+order = [row[0] for row in chart_rows]
+series = ["本計畫", "產業平均"]
+chart_df = pd.DataFrame(
+    [{"項目": lab, "系列": name, "比率": val * 100}
+     for lab, mine, avg in chart_rows for name, val in zip(series, (mine, avg))])
+chart = alt.Chart(chart_df).mark_bar().encode(
+    x=alt.X("項目:N", sort=order, title=None, axis=alt.Axis(labelAngle=0, labelLimit=0)),
+    xOffset=alt.XOffset("系列:N", sort=series),
+    y=alt.Y("比率:Q", title="%"),
+    color=alt.Color("系列:N", sort=series, title=None, legend=alt.Legend(orient="bottom")),
+    tooltip=["項目", "系列", alt.Tooltip("比率:Q", format=".1f", title="%")],
+)
+st.altair_chart(chart, width="stretch")
+st.caption(f"產業數據：經濟部經營實況調查，{plan.industry}，2018–2024 六個調查年平均，"
+           "以營業額加權，大型業者影響較大。現金利益率對照的是折舊前營業利益率"
+           "（營業利益率 + 折舊率）。")
+
+# ===========================================================================
+# 計算依據
+# ===========================================================================
+st.divider()
+st.header("計算依據")
 
 left, right = st.columns(2)
 
-# 2. 月損益表
+# 月損益表
 with left:
     st.subheader("月損益表（穩定期）")
     pnl = pd.DataFrame([
@@ -226,9 +262,9 @@ with left:
     st.caption(f"邊際貢獻率 {r.cm_rate:.2%}：每 100 元營業額，扣掉變動成本後留下 "
                f"{r.cm_rate * 100:.1f} 元。採現金基礎，不攤提啟動資金。")
 
-# 3. 成本結構對照
+# 成本結構明細（長條圖的數字）
 with right:
-    st.subheader("成本結構與產業比較")
+    st.subheader("成本結構明細")
     rows = []
     for g in r.cost_gaps:
         lo, hi = bench[g.key][1:]
@@ -241,28 +277,7 @@ with right:
     st.dataframe(pd.DataFrame(rows).style.format({"本計畫": "{:.1%}", "產業平均": "{:.1%}"}),
                  hide_index=True, width="stretch")
 
-    chart_labels = ["食材（含包材）", "人事", "租金", "現金利益率"]
-    series = ["本計畫", "產業平均"]
-    chart_df = pd.DataFrame(
-        [{"項目": lab, "系列": "本計畫", "比率": row["本計畫"] * 100}
-         for lab, row in zip(chart_labels, rows)]
-        + [{"項目": lab, "系列": "產業平均", "比率": row["產業平均"] * 100}
-           for lab, row in zip(chart_labels, rows)])
-    chart = alt.Chart(chart_df).mark_bar().encode(
-        x=alt.X("項目:N", sort=chart_labels, title=None,
-                axis=alt.Axis(labelAngle=0, labelLimit=0)),
-        xOffset=alt.XOffset("系列:N", sort=series),
-        y=alt.Y("比率:Q", title="%"),
-        color=alt.Color("系列:N", sort=series, title=None,
-                        legend=alt.Legend(orient="bottom")),
-        tooltip=["項目", "系列", alt.Tooltip("比率:Q", format=".1f", title="%")],
-    )
-    st.altair_chart(chart, width="stretch")
-    st.caption(f"產業數據：經濟部經營實況調查，{plan.industry}，2018–2024 六個調查年平均，"
-               "以營業額加權，大型業者影響較大。現金利益率對照的是折舊前營業利益率"
-               "（營業利益率 + 折舊率）。")
-
-# 4. SPLH 區間
+# SPLH 區間
 st.subheader("人力與 SPLH（每工時營業額）")
 zone_msg = {"虧損": st.error, "獲利偏低": st.warning, "健康": st.success,
             "人力吃緊": st.warning}.get(r.splh_zone, st.info)
@@ -281,7 +296,7 @@ st.caption(f"總工時 {r.total_hours:,.2f} 小時／月（正職每人以 {FT_M
 
 left2, right2 = st.columns(2)
 
-# 5. 養店期與回本
+# 養店期逐月表
 with left2:
     st.subheader("養店期與回本")
     b1, b2, b3 = st.columns(3)
@@ -297,23 +312,26 @@ with left2:
     st.caption("養店期預設值來自作者單一門市經驗，請依自身情況調整。"
                "累計現金淨利達到啟動資金的月份即為回本月數，以內插法計算。")
 
-# 6. 風險說明
+# 營業額下滑情境與風險說明
 with right2:
-    st.subheader("風險說明")
-    st.caption("以下只做說明，不影響結論。")
-    st.metric("安全邊際", pct(r.margin_of_safety), help="營業額少多少就會開始虧損")
-    for risk in r.risks:
-        st.markdown(f"- {risk}")
+    st.subheader("營業額下滑情境")
+    v1, v2 = st.columns(2)
+    v1.metric("損益兩平營業額", money(r.breakeven_revenue)
+              if math.isfinite(r.breakeven_revenue) else "無法損益兩平")
+    v2.metric("安全邊際", pct(r.margin_of_safety), help="營業額少多少就會開始虧損")
     sens = pd.DataFrame(r.sensitivity, columns=["情境", "營業額（元）", "現金淨利（元）"])
     st.dataframe(sens.style.format({"營業額（元）": fmt_money, "現金淨利（元）": fmt_money}),
                  hide_index=True, width="stretch")
+    st.markdown("**風險說明**（只做說明，不影響結論）")
+    for risk in r.risks:
+        st.markdown(f"- {risk}")
 
-st.caption(f"法規參數：2026 年基本工資月薪 {MIN_MONTHLY_WAGE_2026:,} 元、時薪 "
-           f"{MIN_HOURLY_WAGE_2026} 元。安全邊際提示門檻 {MOS_THRESHOLD:.0%} 為設計預設值，"
-           "非官方標準。")
-
+# 假設與資料來源
 with st.expander("假設與資料來源"):
     st.dataframe(pd.DataFrame(ASSUMPTIONS, columns=["類別", "項目", "數值", "來源與說明"]),
                  hide_index=True, width="stretch")
     st.caption("公開資料：政府統計；法規：現行法令與公告；設計假設：本工具的預設值，"
                "非官方標準；作者經驗：作者單一門市的經營數字。")
+    st.caption(f"法規參數：2026 年基本工資月薪 {MIN_MONTHLY_WAGE_2026:,} 元、時薪 "
+               f"{MIN_HOURLY_WAGE_2026} 元。安全邊際提示門檻 {MOS_THRESHOLD:.0%} 為設計預設值，"
+               "非官方標準。")
