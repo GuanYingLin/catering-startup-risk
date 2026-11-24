@@ -38,6 +38,8 @@ def test_example_acceptance_numbers(example):
     assert fmt_money(r.splh_healthy) == "787"
     assert fmt_money(r.splh_strained) == "1,236"
     assert r.splh_zone == "健康"
+    assert fmt_money(r.opportunity_cost) == "49,275"  # 老闆去上班月薪 48,000 + 資金利息 1,275
+    assert fmt_money(r.economic_profit) == "19,857"
     assert r.verdict == "可行"
     assert r.verdict_sentence == "可行：三項檢查全部通過"
     assert r.missing_inputs == []
@@ -210,7 +212,9 @@ def test_calculation_details(example):
     assert "兼職：時薪 200 元 × 108.33 小時 × 1.20 = 26,000 元" in d["人事"]
     assert "合計：177,717 元" in d["固定成本"]
     assert any(line.endswith("= 69,132 元") for line in d["固定成本"])
+    assert "老闆去上班的月薪：48,000 元" in d["機會成本"]
     assert "資金利息：啟動資金 900,000 元 × 年利率 1.7% ÷ 12 = 1,275 元" in d["機會成本"]
+    assert "合計：49,275 元；經濟淨利 ＝ 69,132 元 − 49,275 元 = 19,857 元" in d["機會成本"]
     splh = " ".join(d["SPLH 四個門檻"])
     for value in ("= 890 元", "= 641 元", "= 787 元", "= 840 元", "= 1,236 元"):
         assert value in splh

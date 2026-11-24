@@ -52,7 +52,7 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-`tests/test_engine.py` 檢查作者門市的驗收數字（營業淨利 69,132 元、含養店期回本 19.4 個月等）、四種結論、三句重點與極端輸入。
+`tests/test_engine.py` 檢查作者門市的驗收數字（營業淨利 69,132 元、含養店期回本 19.4 個月、經濟淨利 19,857 元等）、四種結論、三句重點與極端輸入。
 
 ## 檔案
 

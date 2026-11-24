@@ -685,7 +685,7 @@ EXAMPLE_STORE = {
     "pt_wage": 200, "pt_hours": 25 * 52 / 12,  # 每週 25 小時（A 17、B 8）
     "owner_hours": 0,
     "rent": 33_000, "utilities": 12_217, "other_fixed": 4_500,
-    "capital": 900_000, "contract_years": 3, "owner_alt_wage": 0,
+    "capital": 900_000, "contract_years": 3, "owner_alt_wage": 48_000,
 }
 
 # ---------------------------------------------------------------------------
