@@ -20,6 +20,10 @@ PCT_KEYS = {"food_rate", "packaging_rate", "delivery_share", "delivery_commissio
             "capital_rate"}
 MAX_FT = 10
 
+# 「成本結構與產業平均」長條圖配色（配合簡報替換時只改這兩個）
+COLOR_PLAN = "#2F6B4F"  # 本計畫：深綠
+COLOR_BENCHMARK = "#948E82"  # 產業平均：暖灰
+
 # 輸入欄位上限：設計預設值，只為擋掉明顯打錯的數字（例如多打幾個 0）
 INPUT_MAX = {
     "ticket": 10_000.0,  # 客單價（元）
@@ -243,16 +247,26 @@ chart_rows = ([(chart_labels[g.key], g.ratio, g.bench_avg) for g in r.cost_gaps]
 order = [row[0] for row in chart_rows]
 series = ["本計畫", "產業平均"]
 chart_df = pd.DataFrame(
-    [{"項目": lab, "系列": name, "比率": val * 100}
+    [{"項目": lab, "系列": name, "比率": val * 100,
+      "標籤": f"{val:.1%}".rstrip("%")}  # 與表格同一套四捨五入，避免圖表與表格差 0.1
      for lab, mine, avg in chart_rows for name, val in zip(series, (mine, avg))])
-chart = alt.Chart(chart_df).mark_bar().encode(
+x_max = max(chart_df["比率"].max(), 0) * 1.18 or 1  # 右側留空間給數值標籤
+x_min = min(chart_df["比率"].min(), 0)
+base = alt.Chart(chart_df).encode(
     y=alt.Y("項目:N", sort=order, title=None, axis=alt.Axis(labelLimit=0)),
     yOffset=alt.YOffset("系列:N", sort=series),
-    x=alt.X("比率:Q", title="%"),
-    color=alt.Color("系列:N", sort=series, title=None, legend=alt.Legend(orient="bottom")),
+    x=alt.X("比率:Q", title="%", scale=alt.Scale(domain=[x_min, x_max], nice=False)),
+)
+bars = base.mark_bar().encode(
+    color=alt.Color("系列:N", sort=series, title=None, legend=alt.Legend(orient="bottom"),
+                    scale=alt.Scale(domain=series, range=[COLOR_PLAN, COLOR_BENCHMARK])),
     tooltip=["項目", "系列", alt.Tooltip("比率:Q", format=".1f", title="%")],
-).properties(height=280)
-st.altair_chart(chart, width="stretch")
+)
+label_color = "#FAFAFA" if st.context.theme.type == "dark" else "#31333F"  # 跟著深淺色主題
+labels = base.mark_text(align="left", baseline="middle", dx=4, fontSize=12,
+                        color=label_color).encode(
+    text=alt.Text("標籤:N"))
+st.altair_chart((bars + labels).properties(height=300), width="stretch")
 st.caption(f"產業數據：經濟部經營實況調查，{plan.industry}，2018–2024 六個調查年平均，"
            f"以營業額加權，大型業者影響較大。營業淨利率（折舊前）對照的是{INDUSTRY_MARGIN_NAME}"
            "（經濟部統計的營業利益率 + 折舊率）。")
