@@ -21,6 +21,10 @@ PCT_KEYS = {"food_rate", "packaging_rate", "delivery_share", "delivery_commissio
             "capital_rate"}
 MAX_FT = 10
 
+# 側欄數字欄位的顯示格式（只影響顯示，不影響計算）；未指定的百分比與倍數欄位維持兩位小數
+FMT_INT = "%.0f"  # 金額、人數：不顯示小數
+FMT_1 = "%.1f"  # 天數、工時、租約年數：一位小數
+
 # 「成本結構與產業平均」長條圖配色（配合簡報替換時只改這兩個）
 COLOR_PLAN = "#1F5C46"  # 本計畫：深綠（與簡報強調色一致）
 COLOR_BENCHMARK = "#948E82"  # 產業平均：暖灰
@@ -115,16 +119,16 @@ with st.sidebar:
         help_customers = "每天的客人數（含外帶、外送）。"
         help_days = ("每月營業天數拆成平日與假日。一個月約 4.3 週：假日（週六、日）約 8.5 天；"
                      "平日約 21.5 天，每週公休一天就再扣約 4.3 天（約 17 天）。")
-        c1.number_input("客單價（元）", 0.0, INPUT_MAX["ticket"], step=5.0, key="weekday_ticket",
+        c1.number_input("客單價（元）", 0.0, INPUT_MAX["ticket"], step=5.0, format=FMT_INT, key="weekday_ticket",
                         help=help_ticket)
         c2.number_input("客單價（元） ", 0.0, INPUT_MAX["ticket"], step=5.0,
-                        key="weekend_ticket", help=help_ticket)
+                        format=FMT_INT, key="weekend_ticket", help=help_ticket)
         c1.number_input("每日來客數", 0.0, INPUT_MAX["customers"], step=5.0,
-                        key="weekday_customers", help=help_customers)
+                        format=FMT_INT, key="weekday_customers", help=help_customers)
         c2.number_input("每日來客數 ", 0.0, INPUT_MAX["customers"], step=5.0,
-                        key="weekend_customers", help=help_customers)
-        c1.number_input("每月天數", 0.0, 31.0, step=0.5, key="weekday_days", help=help_days)
-        c2.number_input("每月天數 ", 0.0, 31.0, step=0.5, key="weekend_days", help=help_days)
+                        format=FMT_INT, key="weekend_customers", help=help_customers)
+        c1.number_input("每月天數", 0.0, 31.0, step=0.5, format=FMT_1, key="weekday_days", help=help_days)
+        c2.number_input("每月天數 ", 0.0, 31.0, step=0.5, format=FMT_1, key="weekend_days", help=help_days)
 
     with st.expander("B 變動成本", expanded=True):
         st.caption("變動成本：跟著營業額等比例增減的成本。")
@@ -146,33 +150,33 @@ with st.sidebar:
         ft_count = int(st.number_input("正職人數", 0, MAX_FT, step=1, key="ft_count"))
         for i in range(ft_count):
             st.number_input(f"正職 {i + 1} 月薪（元）", 0.0, INPUT_MAX["ft_salary"],
-                            step=1000.0, key=f"ft_{i}",
+                            step=1000.0, format=FMT_INT, key=f"ft_{i}",
                             help=f"不可低於 2026 年基本工資 {MIN_MONTHLY_WAGE_2026:,} 元。")
-        st.number_input("兼職時薪（元）", 0.0, INPUT_MAX["pt_wage"], step=5.0, key="pt_wage",
+        st.number_input("兼職時薪（元）", 0.0, INPUT_MAX["pt_wage"], step=5.0, format=FMT_INT, key="pt_wage",
                         help=f"不可低於 2026 年基本時薪 {MIN_HOURLY_WAGE_2026} 元。")
         st.number_input("兼職每月總工時（小時）", 0.0, INPUT_MAX["pt_hours"], step=10.0,
-                        key="pt_hours",
+                        format=FMT_1, key="pt_hours",
                         help="所有兼職人員一個月的工時加總。"
                              "例如每週 25 小時：25 × 52 ÷ 12 ≈ 108 小時。")
         st.number_input("老闆每月在店工時（小時）", 0.0, INPUT_MAX["owner_hours"], step=10.0,
-                        key="owner_hours", help="算進總工時（影響 SPLH），不算進人事成本")
+                        format=FMT_1, key="owner_hours", help="算進總工時（影響 SPLH），不算進人事成本")
 
     with st.expander("D 固定費用", expanded=True):
-        st.number_input("月租金（元）", 0.0, INPUT_MAX["rent"], step=1000.0, key="rent",
+        st.number_input("月租金（元）", 0.0, INPUT_MAX["rent"], step=1000.0, format=FMT_INT, key="rent",
                         help=f"{ref_name}產業租金平均約占營業額 {ref['rent'][0]:.1%}。")
         st.number_input("每月水電瓦斯（元）", 0.0, INPUT_MAX["utilities"], step=500.0,
-                        key="utilities", help="每月水費、電費、瓦斯費合計。")
+                        format=FMT_INT, key="utilities", help="每月水費、電費、瓦斯費合計。")
         st.number_input("其他固定費用（元／月）", 0.0, INPUT_MAX["other_fixed"], step=500.0,
-                        key="other_fixed",
+                        format=FMT_INT, key="other_fixed",
                         help="不隨營業額變動的每月支出，例如網路、POS 月費、記帳、保險、清潔。")
 
     with st.expander("E 投資", expanded=True):
         st.number_input("啟動資金（元）", 0.0, INPUT_MAX["capital"], step=10000.0,
-                        key="capital", help="開店前一次投入的總額：裝潢、設備、加盟金、押金等。")
-        st.number_input("租約或加盟合約年限（年）", 0.0, 20.0, step=0.5, key="contract_years",
+                        format=FMT_INT, key="capital", help="開店前一次投入的總額：裝潢、設備、加盟金、押金等。")
+        st.number_input("租約或加盟合約年限（年）", 0.0, 20.0, step=0.5, format=FMT_1, key="contract_years",
                         help="用來判斷能否在約滿前回本；沒有租約填 0，第 2 項檢查會略過。")
         st.number_input("老闆不開店、去上班的月薪（元）", 0.0, INPUT_MAX["owner_alt_wage"],
-                        step=1000.0, key="owner_alt_wage",
+                        step=1000.0, format=FMT_INT, key="owner_alt_wage",
                         help="如果不開店、改去上班，每月大約能領多少薪水。系統會從營業淨利中扣除"
                              "這筆薪水和啟動資金的利息，算出『經濟淨利』：大於 0，代表開店比去上班"
                              "划算。人事欄位只填員工的薪水；老闆自己的收入，就是營業淨利。")
