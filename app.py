@@ -117,8 +117,8 @@ with st.sidebar:
         c2.caption("假日")
         help_ticket = "每位客人平均消費金額（含外帶、外送）。"
         help_customers = "每天的客人數（含外帶、外送）。"
-        help_days = ("每月營業天數拆成平日與假日。一個月約 4.3 週：假日（週六、日）約 8.5 天；"
-                     "平日約 21.5 天，每週公休一天就再扣約 4.3 天（約 17 天）。")
+        help_weekday_days = "週一到週五的營業天數。一個月約 21.5 個平日；每週公休一天，約扣 4.3 天（約 17 天）。"
+        help_weekend_days = "週六、週日的營業天數。一個月約 8.5 天。"
         c1.number_input("客單價（元）", 0.0, INPUT_MAX["ticket"], step=5.0, format=FMT_INT, key="weekday_ticket",
                         help=help_ticket)
         c2.number_input("客單價（元） ", 0.0, INPUT_MAX["ticket"], step=5.0,
@@ -127,8 +127,10 @@ with st.sidebar:
                         format=FMT_INT, key="weekday_customers", help=help_customers)
         c2.number_input("每日來客數 ", 0.0, INPUT_MAX["customers"], step=5.0,
                         format=FMT_INT, key="weekend_customers", help=help_customers)
-        c1.number_input("每月天數", 0.0, 31.0, step=0.5, format=FMT_1, key="weekday_days", help=help_days)
-        c2.number_input("每月天數 ", 0.0, 31.0, step=0.5, format=FMT_1, key="weekend_days", help=help_days)
+        c1.number_input("每月平日天數", 0.0, 31.0, step=0.5, format=FMT_1, key="weekday_days",
+                        help=help_weekday_days)
+        c2.number_input("每月假日天數", 0.0, 31.0, step=0.5, format=FMT_1, key="weekend_days",
+                        help=help_weekend_days)
 
     with st.expander("B 變動成本", expanded=True):
         st.caption("變動成本：跟著營業額等比例增減的成本。")
