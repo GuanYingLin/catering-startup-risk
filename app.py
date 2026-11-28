@@ -1,4 +1,4 @@
-"""餐飲單店創業前財務風險評估｜Streamlit 介面。
+"""餐飲個店創業前財務風險評估｜Streamlit 介面。
 
 執行：streamlit run app.py
 """
@@ -15,7 +15,7 @@ from engine import (ASSUMPTIONS, AUTHOR, BENCHMARKS, CASES, DATA_UPDATED, DISCLA
                     RAMP_MAX_MONTHS, SPLH_ZONES, TAX_RATES, VERDICTS, Plan, calculation_details,
                     evaluate, fmt_money, fmt_yuan, pct_text)
 
-st.set_page_config(page_title="餐飲單店創業前財務風險評估", layout="wide")
+st.set_page_config(page_title="餐飲個店創業前財務風險評估", layout="wide")
 
 PCT_KEYS = {"food_rate", "packaging_rate", "delivery_share", "delivery_commission",
             "capital_rate"}
@@ -235,7 +235,7 @@ plan = Plan(
 # ---------------------------------------------------------------------------
 # 輸出
 # ---------------------------------------------------------------------------
-st.title("餐飲單店創業前財務風險評估")
+st.title("餐飲個店創業前財務風險評估")
 st.caption("輸入創業計畫，系統以現金基礎計算月損益與含養店期的回本月數，"
            "並與經濟部餐飲業產業數據比較。")
 st.caption("在左側欄輸入你的計畫或切換案例（手機請點左上角 »）。")
